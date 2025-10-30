@@ -38,18 +38,16 @@ This service exposes a manager-cluster-resident API that:
 
 ### Deploy with ko
 
+You can install everything with a single command. Ensure `KO_DOCKER_REPO` is set.
+
 ```bash
-# Deploy with ko
-make deploy
+export KO_DOCKER_REPO="kind.local"   # or your container repo
+ko apply -R -f config/
 ```
 
-### Build and Deploy
+Alternatively, use the Make target which wraps the same command:
 
 ```bash
-# Build with ko (local)
-make ko-build
-
-# Deploy to cluster
 make deploy
 ```
 
@@ -154,26 +152,9 @@ subjects:
 ```bash
 # Port forward to access the service
 make port-forward
-
-# Resolve worker cluster for a PipelineRun
-curl http://localhost:8080/api/v1/namespaces/default/pipelineruns/my-pipeline/resolve
-
-# Get TaskRuns for a PipelineRun
-curl http://localhost:8080/api/v1/namespaces/default/pipelineruns/my-pipeline/taskruns
-
-# Get Pods for a PipelineRun
-curl http://localhost:8080/api/v1/namespaces/default/pipelineruns/my-pipeline/pods
-
-# Get Pod status
-curl "http://localhost:8080/api/v1/namespaces/default/pods/my-pod/status?pipelineRun=my-pipeline"
-
-# Get logs
-curl "http://localhost:8080/api/v1/namespaces/default/logs?pipelineRun=my-pipeline&pod=my-pod&container=my-container"
-
-# Stream logs (WebSocket)
-# Use a WebSocket client or browser to connect to:
-# ws://localhost:8080/api/v1/namespaces/default/logs/stream?pipelineRun=my-pipeline&pod=my-pod&container=my-container
 ```
+
+Refer to the API Endpoints table above for paths and methods. All endpoints (except `/health` and `/ready`) require an `Authorization: Bearer ${TOKEN}` header.
 
 ### Response Headers
 
@@ -188,16 +169,26 @@ All responses include the `X-Worker-Cluster` header indicating which worker clus
 - `424`: Worker config missing/unreachable
 - `502/504`: Upstream errors
 
+### Authorization
+
+All API endpoints (except `/health` and `/ready`) require a valid Kubernetes bearer token in the `Authorization` header:
+
+```
+Authorization: Bearer ${TOKEN}
+```
+
+The proxy validates the caller's permissions in the hub cluster using SelfSubjectAccessReview (SSAR). Requests without a valid token or sufficient permissions will return `403 Forbidden`.
+
 ## Development
 
 ### Local Development
 
 ```bash
 # Run locally
-go run main.go --port=8080 --workers-secret-namespace=proxy-aae
+go run ./cmd/proxy-server/main.go --port=8080 --workers-secret-namespace=kueue-system
 
 # With kubeconfig
-go run main.go --kubeconfig=/path/to/kubeconfig
+go run ./cmd/proxy-server/main.go --kubeconfig=/path/to/kubeconfig
 ```
 
 ### Testing
