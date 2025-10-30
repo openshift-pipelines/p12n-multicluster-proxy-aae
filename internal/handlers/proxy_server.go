@@ -308,9 +308,9 @@ func (p *ProxyServer) handlePodStatus(w http.ResponseWriter, r *http.Request, na
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Worker-Cluster", workerCluster.Name)
 
-	// Write response
-	if err := json.NewEncoder(w).Encode(pod); err != nil {
-		klog.Errorf("Failed to encode pod response: %v", err)
+	// Write response - only return the status portion
+	if err := json.NewEncoder(w).Encode(pod.Status); err != nil {
+		klog.Errorf("Failed to encode pod status response: %v", err)
 	}
 }
 
