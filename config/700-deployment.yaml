@@ -18,7 +18,7 @@ spec:
       serviceAccountName: proxy-aae
       containers:
       - name: proxy-aae
-        image: ko://github.com/openshift-pipelines/multicluster-proxy-aae/cmd/proxy-server
+        image: controller:latest
         ports:
         - containerPort: 8080
           name: http

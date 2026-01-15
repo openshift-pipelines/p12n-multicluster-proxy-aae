@@ -3,7 +3,9 @@
 # Variables
 BINARY_NAME=proxy-aae
 NAMESPACE=proxy-aae
-KO_IMAGE=ko://github.com/openshift-pipelines/multicluster-proxy-aae
+IMG ?= ko://github.com/openshift-pipelines/multicluster-proxy
+RELEASE_DIR ?= release
+VERSION ?= nightly
 
 # Go parameters
 GOCMD=go
@@ -12,6 +14,39 @@ GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
+
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
+## Tool Binaries
+KUBECTL ?= kubectl
+KUSTOMIZE ?= $(LOCALBIN)/kustomize
+
+## Tool Versions
+KUSTOMIZE_VERSION ?= v5.5.0
+
+.PHONY: kustomize
+kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
+$(KUSTOMIZE): $(LOCALBIN)
+	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f "$(1)-$(3)" ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+rm -f $(1) || true ;\
+GOBIN=$(LOCALBIN) go install $${package} ;\
+mv $(1) $(1)-$(3) ;\
+} ;\
+ln -sf $(1)-$(3) $(1)
+endef
 
 # Build the binary
 build:
@@ -83,3 +118,9 @@ help:
 	@echo "  lint          - Lint code"
 	@echo "  all           - Run deps, test, and build"
 	@echo "  help          - Show this help"
+
+.PHONY: release
+release: kustomize
+	mkdir -p ${RELEASE_DIR}
+	cd config && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config -o ${RELEASE_DIR}/release-${VERSION}.yaml
