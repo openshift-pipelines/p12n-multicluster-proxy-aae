@@ -5,19 +5,19 @@ FROM $GO_BUILDER AS builder
 
 WORKDIR /go/src/github.com/openshift-pipelines/multicluster-proxy-aae
 COPY upstream .
+COPY .konflux/patches ./patches
 RUN set -e; for f in patches/*.patch; do echo ${f}; [[ -f ${f} ]] || continue; git apply ${f}; done
 ENV GODEBUG="http2server=0"
-ENV GOEXPERIMENT=strictfipsruntime
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-X 'knative.dev/pkg/changeset.rev=$(cat /tmp/HEAD)'" -mod=vendor -tags disable_gcp,strictfipsruntime -v -o /tmp/workload-controller \
-    ./cmd/controller
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=vendor -v -o /tmp/proxy-aae \
+    ./cmd/proxy-server
 
 FROM $RUNTIME
-ARG VERSION=multicluster-proxy-aae-controller-main
+ARG VERSION=multicluster-proxy-aae-proxy-server-main
 
 WORKDIR /
 
-# Copy the binary from builder stage
-COPY --from=builder /tmp/workload-controller /workload-controller
+
+COPY --from=builder /tmp/proxy-aae /ko-app/proxy-aae
 
 LABEL \
     com.redhat.component="openshift-pipelines-multicluster-proxy-aae-rhel9-container" \
@@ -34,4 +34,5 @@ RUN microdnf install -y shadow-utils && \
     groupadd -r -g 65532 nonroot && useradd --no-log-init -r -u 65532 -g nonroot nonroot
 USER 65532
 
-ENTRYPOINT ["/workload-controller"]
+EXPOSE 8080
+ENTRYPOINT ["/ko-app/proxy-aae"]
