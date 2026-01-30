@@ -1,45 +1,53 @@
 # Generated for Konflux Application openshift-pipelines-core by openshift-pipelines/hack. DO NOT EDIT
-name: auto-merge-upstream-openshift-pipelines/multicluster-proxy-aae
+name: auto-merge-upstream
+
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "0,30 * * * *"
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  collect-branches:
+  auto-approve-and-merge:
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    permissions:
+      pull-requests: write
     steps:
-      - name: Get branches matching pattern
-        id: set-matrix
-        run: |
-          # List all branches and filter
-          branches=$(gh api repos/${{ github.repository }}/branches --paginate -q '.[] | .name' | grep -E '^(release-v.*\.x$|next$)')
-          echo "Found branches:"
-          echo "$branches"
-          # Convert to JSON array for matrix
-          json=$(jq -nc --argjson arr "$(printf '%s\n' "$branches" | jq -R . | jq -s .)" '{branch: $arr}')
-          echo "Matrix JSON: $json"
-          echo "matrix=$json" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  auto-merge-upstream-all:
-    needs: collect-branches
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.collect-branches.outputs.matrix) }}
-    steps:
-      - name: Trigger auto-merge-upstream for ${{ matrix.branch }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo Triggering workflow for branch: ${{ matrix.branch }}
-          
-          gh workflow run "auto-merge-upstream.yaml" \
-                                                                                                                                                                                                                                                                                                              --ref ${{ matrix.branch }} \
-                                                                                                                                                                                                                                                                                                              --repo ${{ github.repository }}
+    - name: Checkout the current repo
+      uses: actions/checkout@v5
+    - name: List PRs
+      id: list-prs
+      run: |
+        echo "Listing PRs"
+        gh auth status
+        git config user.name openshift-pipelines-bot
+        git config user.email pipelines-extcomm@redhat.com
+        # Approve and merge pull-request with no reviews
+
+        pr_list=$(gh pr list \
+          --state open \
+          --search 'label:upstream -label:do-not-merge/hold' \
+          --json number,title,statusCheckRollup \
+          --jq ' .[]| select((.statusCheckRollup // [])| all(.conclusion == "SUCCESS" or .conclusion == "SKIPPED"))| "\(.number)"')    
+        
+        echo "pr_list=$pr_list"  >> "$GITHUB_OUTPUT"
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: add LGTM Label
+      run: |
+        # Approve and merge pull-request with no reviews
+        for p in $pr_list; do
+          echo "Adding lgtm label to  PR $p"
+          gh pr edit $p --add-label "lgtm" || true
+        done
+      env:
+        pr_list: ${{ steps.list-prs.outputs.pr_list }} 
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Merging PRs
+      run: |
+        # Approve and merge pull-request with no reviews
+        for p in $pr_list; do
+          echo "Merging  PR $p"
+          gh pr merge --rebase --delete-branch --auto $p
+        done
+      env:
+        pr_list: ${{ steps.list-prs.outputs.pr_list }} 
+        GH_TOKEN: ${{ secrets.OPENSHIFT_PIPELINES_ROBOT }}

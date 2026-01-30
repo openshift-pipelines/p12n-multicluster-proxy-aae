@@ -1,47 +1,71 @@
 # Generated for Konflux Application openshift-pipelines-core by openshift-pipelines/hack. DO NOT EDIT
-name: update-sources-openshift-pipelines/multicluster-proxy-aae
+name: update-sources
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "0 0 * * *"
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  collect-branches:
+  update-sources:
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
-      - name: Get branches matching pattern
-        id: set-matrix
-        run: |
-          # List all branches and filter
-          branches=$(gh api repos/${{ github.repository }}/branches --paginate -q '.[] | .name' | grep -E '^(release-v.*\.x$|next$)')
-          echo "Found branches:"
-          echo "$branches"
-          
-          # Convert to JSON array for matrix
-          json=$(jq -nc --argjson arr "$(printf '%s\n' "$branches" | jq -R . | jq -s .)" '{branch: $arr}')
-          echo "Matrix JSON: $json"
-          
-          echo "matrix=$json" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  build:
-    needs: collect-branches
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.collect-branches.outputs.matrix) }}
-    steps:
-      - name: Trigger update-sources workflow for ${{ matrix.branch }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo Triggering workflow for branch: ${{ matrix.branch }}
-          
-          gh workflow run "update-sources.yaml" \
-            --ref ${{ matrix.branch }} \
-            --repo ${{ github.repository }}
+    - name: Checkout the current repo
+      uses: actions/checkout@v4
+      with:
+        ref: next
+
+    - name: Clone openshift-pipelines/multicluster-proxy-aae
+      run: |
+        rm -fR upstream
+        git clone https://github.com/openshift-pipelines/multicluster-proxy-aae upstream
+        pushd upstream
+        git checkout -B release-v0.1.x origin/release-v0.1.x
+        popd
+    - name: Commit new changes
+      run: |
+        
+        set -x
+        
+        git config user.name openshift-pipelines-bot
+        git config user.email pipelines-extcomm@redhat.com
+        git checkout -b actions/update/sources-next
+        touch head
+        pushd upstream
+        OLD_COMMIT=$(cat ../head)
+        NEW_COMMIT=$(git rev-parse HEAD)
+        echo Previous commit: ${OLD_COMMIT}
+        git show --stat ${OLD_COMMIT}
+        echo New commit: ${NEW_COMMIT}
+        git show --stat ${NEW_COMMIT}
+        git diff --stat ${NEW_COMMIT}..${OLD_COMMIT} > /tmp/diff.txt
+        git rev-parse HEAD > ../head
+        popd
+        rm -rf upstream/.git
+        git add -f upstream head .konflux
+
+        if [[ -z $(git status --porcelain --untracked-files=no) ]]; then
+          echo "No change, exiting"
+          exit 0
+        fi
+
+        git commit -F- <<EOF
+        [bot] Update next from openshift-pipelines/multicluster-proxy-aae to ${NEW_COMMIT}
+
+            $ git diff --stat ${NEW_COMMIT}..${OLD_COMMIT}
+        $(cat /tmp/diff.txt | sed 's/^/    /' | head -c 55555)
+        
+        https://github.com/openshift-pipelines/multicluster-proxy-aae/compare/${NEW_COMMIT}..${OLD_COMMIT}
+        EOF
+        
+        git push -f origin actions/update/sources-next
+
+        if [ "$(gh pr list --base next --head actions/update/sources-next --json url --jq 'length')" = "0" ]; then
+          echo "creating PR..."
+          gh pr create -B next -H actions/update/sources-next --label=automated --label=upstream --fill
+        else
+          echo "a PR already exists, editing..."
+          gh pr edit --title "[bot] Update next from openshift-pipelines/multicluster-proxy-aae to ${NEW_COMMIT}" --body "$(cat /tmp/diff.txt | sed 's/^/    /' | head -c 55555)"
+        fi
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
