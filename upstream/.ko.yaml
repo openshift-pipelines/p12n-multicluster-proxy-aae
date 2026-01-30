@@ -1,0 +1,5 @@
+defaultBaseImage: gcr.io/distroless/static:nonroot
+builds:
+- id: proxy-aae
+  dir: ./cmd/proxy-server
+  main: ./main.go
