@@ -13,13 +13,13 @@ metadata:
       == "release-v1.22.x" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
       ".konflux/dockerfiles/proxy-server.Dockerfile".pathChanged() ||
-      ".tekton/p12n-multicluster-proxy-aae-1-22-proxy-server-push.yaml".pathChanged())
+      ".tekton/multicluster-proxy-aae-1-22-proxy-server-push.yaml".pathChanged())
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: openshift-pipelines-core-1-22
-    appstudio.openshift.io/component: p12n-multicluster-proxy-aae-1-22-proxy-server
+    appstudio.openshift.io/component: multicluster-proxy-aae-1-22-proxy-server
     pipelines.appstudio.openshift.io/type: build
-  name: p12n-multicluster-proxy-aae-1-22-proxy-server-on-push
+  name: multicluster-proxy-aae-1-22-proxy-server-on-push
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -42,7 +42,7 @@ spec:
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-p12n-multicluster-proxy-aae-1-22-proxy-server
+    serviceAccountName: build-pipeline-multicluster-proxy-aae-1-22-proxy-server
   workspaces:
   - name: git-auth
     secret:
