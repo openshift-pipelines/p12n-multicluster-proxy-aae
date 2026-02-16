@@ -20,15 +20,16 @@ WORKDIR /
 COPY --from=builder /tmp/proxy-aae /ko-app/proxy-aae
 
 LABEL \
-    com.redhat.component="openshift-pipelines-multicluster-proxy-aae-rhel9-container" \
-    name="openshift-pipelines/multicluster-proxy-aae-rhel9" \
-    version=$VERSION \
-    summary="Red Hat OpenShift Pipelines Multicluster Proxy Service" \
-    maintainer="pipelines-extcomm@redhat.com" \
-    description="Red Hat OpenShift Pipelines Proxy Service" \
-    io.k8s.display-name="Red Hat OpenShift Pipelines Proxy Service" \
-    io.k8s.description="Red Hat OpenShift Pipelines Proxy Service" \
-    io.openshift.tags="pipelines,tekton,openshift"
+      com.redhat.component="openshift-pipelines-multicluster-proxy-aae-proxy-server-rhel9-container" \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.22::el9" \
+      description="Red Hat OpenShift Pipelines multicluster-proxy-aae proxy-server" \
+      io.k8s.description="Red Hat OpenShift Pipelines multicluster-proxy-aae proxy-server" \
+      io.k8s.display-name="Red Hat OpenShift Pipelines multicluster-proxy-aae proxy-server" \
+      io.openshift.tags="tekton,openshift,multicluster-proxy-aae,proxy-server" \
+      maintainer="pipelines-extcomm@redhat.com" \
+      name="openshift-pipelines/pipelines-multicluster-proxy-aae-proxy-server-rhel9" \
+      summary="Red Hat OpenShift Pipelines multicluster-proxy-aae proxy-server" \
+      version="v1.22.0"
 
 RUN microdnf install -y shadow-utils && \
     groupadd -r -g 65532 nonroot && useradd --no-log-init -r -u 65532 -g nonroot nonroot
