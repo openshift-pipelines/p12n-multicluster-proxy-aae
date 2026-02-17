@@ -6,7 +6,7 @@ This document provides comprehensive testing instructions for the Proxy-AAE serv
 
 - Kubernetes cluster with MultiKueue and Tekton installed
 - Proxy-AAE service deployed and running
-- Port forwarding to proxy service: `kubectl port-forward -n proxy-aae svc/proxy-aae 8080:8080`
+- Port forwarding to proxy service: `kubectl port-forward -n proxy-aae svc/proxy-aae 8080:443`
 - Running PipelineRun in the cluster
 
 ## Test Setup
@@ -42,7 +42,7 @@ kubectl create token test-user -n default
 
 ```bash
 # Test PipelineRun resolution without token
-curl -v "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
+curl -k -v "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
 ```
 
 **Expected Result**: `403 Forbidden` with message "Access denied: no authorization token provided"
@@ -51,8 +51,8 @@ curl -v "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-t
 
 ```bash
 # Test with invalid token
-curl -v -H "Authorization: Bearer invalid-token" \
-  "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
+curl -k -v -H "Authorization: Bearer invalid-token" \
+  "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
 ```
 
 **Expected Result**: `403 Forbidden` with message "failed to create SelfSubjectAccessReview: Unauthorized"
@@ -61,8 +61,8 @@ curl -v -H "Authorization: Bearer invalid-token" \
 
 ```bash
 # Replace TOKEN with the actual token from step 1
-curl -H "Authorization: Bearer ${TOKEN}" \
-  "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
+curl -k -H "Authorization: Bearer ${TOKEN}" \
+  "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
 ```
 
 **Expected Result**: `200 OK` with worker cluster information:
@@ -76,8 +76,8 @@ curl -H "Authorization: Bearer ${TOKEN}" \
 
 ```bash
 # Test TaskRuns with valid token
-curl -H "Authorization: Bearer ${TOKEN}" \
-  "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/taskruns"
+curl -k -H "Authorization: Bearer ${TOKEN}" \
+  "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/taskruns"
 ```
 
 **Expected Result**: `200 OK` with TaskRuns list containing pipeline tasks
@@ -86,8 +86,8 @@ curl -H "Authorization: Bearer ${TOKEN}" \
 
 ```bash
 # Test Pods with valid token
-curl -H "Authorization: Bearer ${TOKEN}" \
-  "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/pods"
+curl -k -H "Authorization: Bearer ${TOKEN}" \
+  "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/pods"
 ```
 
 **Expected Result**: `200 OK` with Pods list containing pipeline pods
@@ -96,8 +96,8 @@ curl -H "Authorization: Bearer ${TOKEN}" \
 
 ```bash
 # Test Pod status with valid token
-curl -H "Authorization: Bearer ${TOKEN}" \
-  "http://localhost:8080/api/v1/namespaces/default/pods/pipeline-test-echo-pod/status?pipelineRun=pipeline-test"
+curl -k -H "Authorization: Bearer ${TOKEN}" \
+  "https://localhost:8080/api/v1/namespaces/default/pods/pipeline-test-echo-pod/status?pipelineRun=pipeline-test"
 ```
 
 **Expected Result**: `200 OK` with detailed pod status information
@@ -106,8 +106,8 @@ curl -H "Authorization: Bearer ${TOKEN}" \
 
 ```bash
 # Test logs with valid token
-curl -H "Authorization: Bearer ${TOKEN}" \
-  "http://localhost:8080/api/v1/namespaces/default/logs?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"
+curl -k -H "Authorization: Bearer ${TOKEN}" \
+  "https://localhost:8080/api/v1/namespaces/default/logs?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"
 ```
 
 **Expected Result**: `200 OK` with log content (e.g., "Hello World")
@@ -118,12 +118,12 @@ curl -H "Authorization: Bearer ${TOKEN}" \
 
 ```bash
 # Test WebSocket without token
-curl -i -N \
+curl -k -i -N \
   -H "Connection: Upgrade" \
   -H "Upgrade: websocket" \
   -H "Sec-WebSocket-Version: 13" \
   -H "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==" \
-  "http://localhost:8080/api/v1/namespaces/default/logs/stream?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"
+  "https://localhost:8080/api/v1/namespaces/default/logs/stream?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"
 ```
 
 **Expected Result**: `403 Forbidden` with message "Access denied: no authorization token provided"
@@ -132,13 +132,13 @@ curl -i -N \
 
 ```bash
 # Test WebSocket with valid token
-curl -i -N \
+curl -k -i -N \
   -H "Connection: Upgrade" \
   -H "Upgrade: websocket" \
   -H "Sec-WebSocket-Version: 13" \
   -H "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==" \
   -H "Authorization: Bearer ${TOKEN}" \
-  "http://localhost:8080/api/v1/namespaces/default/logs/stream?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"
+  "https://localhost:8080/api/v1/namespaces/default/logs/stream?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"
 ```
 
 **Expected Result**: `101 Switching Protocols` with WebSocket upgrade and log streaming
@@ -147,7 +147,8 @@ curl -i -N \
 
 ```bash
 # Test WebSocket with wscat (with token)
-timeout 5s wscat -c "ws://localhost:8080/api/v1/namespaces/default/logs/stream?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"   -H "Authorization: Bearer $TOKEN"
+# Use --no-check to ignore self-signed certificate errors
+timeout 5s wscat --no-check -c "wss://localhost:8080/api/v1/namespaces/default/logs/stream?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"   -H "Authorization: Bearer $TOKEN"
 ```
 
 **Note**: `wscat` may not properly send Authorization headers during WebSocket upgrades, so results may vary.
@@ -158,10 +159,10 @@ timeout 5s wscat -c "ws://localhost:8080/api/v1/namespaces/default/logs/stream?p
 
 ```bash
 # Test health check
-curl "http://localhost:8080/health"
+curl -k "https://localhost:8080/health"
 
 # Test readiness check
-curl "http://localhost:8080/ready"
+curl -k "https://localhost:8080/ready"
 ```
 
 **Expected Result**: Both should return `200 OK` with "OK" and "Ready" respectively
@@ -174,11 +175,11 @@ Run the following tests to ensure all endpoints require proper authorization:
 
 ```bash
 # Test all endpoints without token (should all fail with 403)
-curl "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
-curl "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/taskruns"
-curl "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/pods"
-curl "http://localhost:8080/api/v1/namespaces/default/pods/pipeline-test-echo-pod/status"
-curl "http://localhost:8080/api/v1/namespaces/default/logs?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"
+curl -k "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
+curl -k "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/taskruns"
+curl -k "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/pods"
+curl -k "https://localhost:8080/api/v1/namespaces/default/pods/pipeline-test-echo-pod/status"
+curl -k "https://localhost:8080/api/v1/namespaces/default/logs?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"
 ```
 
 **Expected Result**: All should return `403 Forbidden`
@@ -187,11 +188,11 @@ curl "http://localhost:8080/api/v1/namespaces/default/logs?pipelineRun=pipeline-
 
 ```bash
 # Test all endpoints with valid token (should all succeed with 200)
-curl -H "Authorization: Bearer TOKEN" "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
-curl -H "Authorization: Bearer TOKEN" "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/taskruns"
-curl -H "Authorization: Bearer TOKEN" "http://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/pods"
-curl -H "Authorization: Bearer TOKEN" "http://localhost:8080/api/v1/namespaces/default/pods/pipeline-test-echo-pod/status"
-curl -H "Authorization: Bearer TOKEN" "http://localhost:8080/api/v1/namespaces/default/logs?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"
+curl -k -H "Authorization: Bearer TOKEN" "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
+curl -k -H "Authorization: Bearer TOKEN" "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/taskruns"
+curl -k -H "Authorization: Bearer TOKEN" "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/pods"
+curl -k -H "Authorization: Bearer TOKEN" "https://localhost:8080/api/v1/namespaces/default/pods/pipeline-test-echo-pod/status"
+curl -k -H "Authorization: Bearer TOKEN" "https://localhost:8080/api/v1/namespaces/default/logs?pipelineRun=pipeline-test&pod=pipeline-test-echo-pod&container=step-echo"
 ```
 
 **Expected Result**: All should return `200 OK` with appropriate data

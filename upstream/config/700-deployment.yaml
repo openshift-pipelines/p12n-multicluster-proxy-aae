@@ -18,10 +18,13 @@ spec:
       serviceAccountName: proxy-aae
       containers:
       - name: proxy-aae
-        image: controller:latest
+        image: ko://github.com/openshift-pipelines/multicluster-proxy-aae/cmd/proxy-server
+        args:
+        - "--tls-cert=/etc/tls/tls.crt"
+        - "--tls-key=/etc/tls/tls.key"
         ports:
         - containerPort: 8080
-          name: http
+          name: https
         env:
         - name: WORKERS_SECRET_NAMESPACE
           value: "kueue-system"
@@ -38,18 +41,28 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
+        volumeMounts:
+        - name: tls-certs
+          mountPath: "/etc/tls"
+          readOnly: true
         livenessProbe:
           httpGet:
+            scheme: HTTPS
             path: /health
             port: 8080
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
+            scheme: HTTPS
             path: /ready
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 5
+      volumes:
+      - name: tls-certs
+        secret:
+          secretName: proxy-server-tls
 ---
 apiVersion: v1
 kind: Service
@@ -58,12 +71,14 @@ metadata:
   namespace: proxy-aae
   labels:
     app: proxy-aae
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: proxy-server-tls
 spec:
   selector:
     app: proxy-aae
   ports:
-  - port: 80
+  - port: 443
     targetPort: 8080
     protocol: TCP
-    name: http
+    name: https
   type: ClusterIP
