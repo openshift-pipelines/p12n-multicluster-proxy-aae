@@ -21,16 +21,15 @@ $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
 ## Tool Binaries
-KUBECTL ?= kubectl
-KUSTOMIZE ?= $(LOCALBIN)/kustomize
+KO ?= $(LOCALBIN)/ko
 
 ## Tool Versions
-KUSTOMIZE_VERSION ?= v5.5.0
+KO_VERSION ?= v0.17.1
 
-.PHONY: kustomize
-kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
-$(KUSTOMIZE): $(LOCALBIN)
-	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+.PHONY: ko
+ko: $(KO) ## Download ko locally if necessary.
+$(KO): $(LOCALBIN)
+	$(call go-install-tool,$(KO),github.com/google/ko,$(KO_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
@@ -71,20 +70,20 @@ deps:
 	$(GOMOD) tidy
 
 # Build and push with ko
-ko-build:
-	ko build --local .
+ko-build: $(KO)
+	$(KO) build --local .
 
 # Deploy to Kubernetes with ko
-deploy:
-	ko apply -R -f config/
+deploy: $(KO)
+	$(KO) apply -R -f config/
 
 # Undeploy from Kubernetes
-undeploy:
-	ko delete -R -f config/
+undeploy: $(KO)
+	$(KO) delete -R -f config/
 
 # Port forward for local testing
 port-forward:
-	kubectl port-forward svc/proxy-aae 8080:80 -n $(NAMESPACE)
+	kubectl port-forward svc/proxy-aae 8080:443 -n $(NAMESPACE)
 
 # Run locally
 run:
@@ -120,7 +119,6 @@ help:
 	@echo "  help          - Show this help"
 
 .PHONY: release
-release: kustomize
+release: $(KO)
 	mkdir -p ${RELEASE_DIR}
-	cd config && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config -o ${RELEASE_DIR}/release-${VERSION}.yaml
+	$(KO) resolve -f config/ > ${RELEASE_DIR}/release.yaml

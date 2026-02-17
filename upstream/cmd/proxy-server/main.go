@@ -27,6 +27,8 @@ func main() {
 		requestTimeout      = flag.Duration("request-timeout", 30*time.Second, "Timeout for worker cluster requests")
 		defaultLogTailLines = flag.Int("default-log-tail-lines", 100, "Default number of log lines to tail")
 		kubeconfig          = flag.String("kubeconfig", "", "Path to kubeconfig file")
+		tlsCert             = flag.String("tls-cert", "", "Path to TLS certificate file")
+		tlsKey              = flag.String("tls-key", "", "Path to TLS key file")
 	)
 	flag.Parse()
 
@@ -80,8 +82,15 @@ func main() {
 	klog.Infof("Workers secret namespace: %s", *workersSecretNS)
 	klog.Infof("Request timeout: %v", *requestTimeout)
 
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Server failed to start: %v", err)
+	if *tlsCert != "" && *tlsKey != "" {
+		klog.Infof("Starting proxy server with TLS")
+		if err := server.ListenAndServeTLS(*tlsCert, *tlsKey); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start with TLS: %v", err)
+		}
+	} else {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start: %v", err)
+		}
 	}
 }
 
