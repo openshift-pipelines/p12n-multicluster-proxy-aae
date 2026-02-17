@@ -34,24 +34,32 @@ cd proxy-aae
 export KO_DOCKER_REPO="kind.local"
 ```
 
-### 3. Deploy to Kubernetes
+### 3. Generate TLS Certificate
+
+Run the script to generate a self-signed certificate and create the Kubernetes secret:
+
+```bash
+./hack/generate-tls-cert.sh
+```
+
+### 4. Deploy to Kubernetes
 
 ```bash
 ko apply -R -f config/
 ```
 
 
-### 4. Test the deployment
+### 5. Test the deployment
 
 ```bash
 # Port forward to access the service
 make port-forward
 
 # Test the health endpoint
-curl http://localhost:8080/health
+curl -k https://localhost:8080/health
 
 # Test the ready endpoint
-curl http://localhost:8080/ready
+curl -k https://localhost:8080/ready
 ```
 
 
