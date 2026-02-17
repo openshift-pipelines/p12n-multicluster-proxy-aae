@@ -5,6 +5,8 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # This line prevents the job from running if CODE_FREEZE is true
+  if: !true
   auto-approve-and-merge:
     runs-on: ubuntu-latest
     permissions:
