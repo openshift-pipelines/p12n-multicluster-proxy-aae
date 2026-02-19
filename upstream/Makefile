@@ -22,14 +22,21 @@ $(LOCALBIN):
 
 ## Tool Binaries
 KO ?= $(LOCALBIN)/ko
+KUSTOMIZE ?= $(LOCALBIN)/kustomize
 
 ## Tool Versions
 KO_VERSION ?= v0.17.1
+KUSTOMIZE_VERSION ?= v5.5.0
 
 .PHONY: ko
 ko: $(KO) ## Download ko locally if necessary.
 $(KO): $(LOCALBIN)
 	$(call go-install-tool,$(KO),github.com/google/ko,$(KO_VERSION))
+
+.PHONY: kustomize
+kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
+$(KUSTOMIZE): $(LOCALBIN)
+	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
@@ -75,11 +82,11 @@ ko-build: $(KO)
 
 # Deploy to Kubernetes with ko
 deploy: $(KO)
-	$(KO) apply -R -f config/
+	kubectl kustomize config/base/ | $(KO) apply -f -
 
 # Undeploy from Kubernetes
 undeploy: $(KO)
-	$(KO) delete -R -f config/
+	kubectl kustomize config/base/ | $(KO) delete -f -
 
 # Port forward for local testing
 port-forward:
@@ -119,6 +126,7 @@ help:
 	@echo "  help          - Show this help"
 
 .PHONY: release
-release: $(KO)
+release: $(KUSTOMIZE)
 	mkdir -p ${RELEASE_DIR}
-	$(KO) resolve -f config/ > ${RELEASE_DIR}/release.yaml
+	cd config/release && $(KUSTOMIZE) edit set image ko://github.com/openshift-pipelines/multicluster-proxy-aae/cmd/proxy-server=${IMG}:${VERSION}
+	$(KUSTOMIZE) build config/release -o ${RELEASE_DIR}/release-${VERSION}.yaml
