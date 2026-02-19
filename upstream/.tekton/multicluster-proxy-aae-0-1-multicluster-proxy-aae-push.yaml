@@ -35,7 +35,7 @@ spec:
     value: Dockerfile
   - name: additional-tags
     value:
-      - "v0.1.1"
+      - "v0.1.0"
   - name: prefetch-input
     value: |
       {"type": "rpm", "path": ".konflux/rpms"}
