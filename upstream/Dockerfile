@@ -28,3 +28,15 @@ EXPOSE 8080
 
 # Run the application
 ENTRYPOINT ["/proxy-aae"]
+
+LABEL \
+      com.redhat.component="openshift-multicluster-proxy-aae/multicluster-proxy-aae-rhel9-container" \
+      cpe="cpe:/a:redhat:openshift_pipelines:0.1::el9" \
+      description="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
+      io.k8s.description="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
+      io.k8s.display-name="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
+      io.openshift.tags="tekton,openshift,multicluster-proxy-aae,multicluster-proxy-aae" \
+      maintainer="pipelines-extcomm@redhat.com" \
+      name="openshift-pipelines/multicluster-proxy-aae/multicluster-proxy-aae-rhel9" \
+      summary="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
+      version="v0.1.0"
