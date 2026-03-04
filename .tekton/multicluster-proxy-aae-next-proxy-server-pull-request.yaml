@@ -14,12 +14,12 @@ metadata:
       == "next" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
       ".konflux/dockerfiles/proxy-server.Dockerfile".pathChanged() ||
-      ".tekton/p12n-multicluster-proxy-aae-next-proxy-server-pull-request.yaml".pathChanged())
+      ".tekton/multicluster-proxy-aae-next-proxy-server-pull-request.yaml".pathChanged())
   labels:
     appstudio.openshift.io/application: openshift-pipelines-core-next
-    appstudio.openshift.io/component: p12n-multicluster-proxy-aae-next-proxy-server
+    appstudio.openshift.io/component: multicluster-proxy-aae-next-proxy-server
     pipelines.appstudio.openshift.io/type: build
-  name: p12n-multicluster-proxy-aae-next-proxy-server-on-pull-request
+  name: multicluster-proxy-aae-next-proxy-server-on-pull-request
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -47,7 +47,7 @@ spec:
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-p12n-multicluster-proxy-aae-next-proxy-server
+    serviceAccountName: build-pipeline-multicluster-proxy-aae-next-proxy-server
   workspaces:
   - name: git-auth
     secret:
