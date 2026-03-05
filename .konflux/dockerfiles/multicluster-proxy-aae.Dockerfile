@@ -20,15 +20,15 @@ WORKDIR /
 COPY --from=builder /tmp/proxy-aae /ko-app/proxy-aae
 
 LABEL \
-      com.redhat.component="openshift-pipelines-multicluster-proxy-aae-proxy-server-rhel9-container" \
+      com.redhat.component="openshift-pipelines-multicluster-proxy-aae-rhel9-container" \
       cpe="cpe:/a:redhat:openshift_pipelines:next::el9" \
-      description="Red Hat OpenShift Pipelines multicluster-proxy-aae proxy-server" \
-      io.k8s.description="Red Hat OpenShift Pipelines multicluster-proxy-aae proxy-server" \
-      io.k8s.display-name="Red Hat OpenShift Pipelines multicluster-proxy-aae proxy-server" \
-      io.openshift.tags="tekton,openshift,multicluster-proxy-aae,proxy-server" \
+      description="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
+      io.k8s.description="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
+      io.k8s.display-name="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
+      io.openshift.tags="tekton,openshift,multicluster-proxy-aae,multicluster-proxy-aae" \
       maintainer="pipelines-extcomm@redhat.com" \
-      name="openshift-pipelines/pipelines-multicluster-proxy-aae-proxy-server-rhel9" \
-      summary="Red Hat OpenShift Pipelines multicluster-proxy-aae proxy-server" \
+      name="openshift-pipelines/pipelines-multicluster-proxy-aae-rhel9" \
+      summary="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
       version="next"
 
 RUN microdnf install -y shadow-utils && \

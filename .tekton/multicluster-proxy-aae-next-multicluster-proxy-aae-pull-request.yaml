@@ -13,13 +13,13 @@ metadata:
     pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
       == "next" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
-      ".konflux/dockerfiles/proxy-server.Dockerfile".pathChanged() ||
-      ".tekton/multicluster-proxy-aae-next-proxy-server-pull-request.yaml".pathChanged())
+      ".konflux/dockerfiles/multicluster-proxy-aae.Dockerfile".pathChanged() ||
+      ".tekton/multicluster-proxy-aae-next-multicluster-proxy-aae-pull-request.yaml".pathChanged())
   labels:
     appstudio.openshift.io/application: openshift-pipelines-core-next
-    appstudio.openshift.io/component: multicluster-proxy-aae-next-proxy-server
+    appstudio.openshift.io/component: multicluster-proxy-aae-next-multicluster-proxy-aae
     pipelines.appstudio.openshift.io/type: build
-  name: multicluster-proxy-aae-next-proxy-server-on-pull-request
+  name: multicluster-proxy-aae-next-multicluster-proxy-aae-on-pull-request
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -30,11 +30,11 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pipelines-multicluster-proxy-aae-proxy-server-rhel9:on-pr-{{revision}}
+    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pipelines-multicluster-proxy-aae-rhel9:on-pr-{{revision}}
   - name: image-expires-after
     value: 5d
   - name: dockerfile
-    value: .konflux/dockerfiles/proxy-server.Dockerfile
+    value: .konflux/dockerfiles/multicluster-proxy-aae.Dockerfile
   - name: additional-tags
     value:
       - "on-pr-next"
@@ -47,7 +47,7 @@ spec:
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-multicluster-proxy-aae-next-proxy-server
+    serviceAccountName: build-pipeline-multicluster-proxy-aae-next-multicluster-proxy-aae
   workspaces:
   - name: git-auth
     secret:
