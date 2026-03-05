@@ -1,4 +1,4 @@
-ARG GO_BUILDER=brew.registry.redhat.io/rh-osbs/openshift-golang-builder:v1.25
+ARG GO_BUILDER=registry.access.redhat.com/ubi9/go-toolset:9.7-1772454089@sha256:b3b98e0b21ddbb979d968ca319b8eebdca121e30d58994072cbf99ce86e5d24e
 ARG RUNTIME=registry.redhat.io/ubi9/ubi-minimal@sha256:c7d44146f826037f6873d99da479299b889473492d3c1ab8af86f08af04ec8a0
 
 FROM $GO_BUILDER AS builder
@@ -6,14 +6,14 @@ FROM $GO_BUILDER AS builder
 WORKDIR /go/src/github.com/openshift-pipelines/multicluster-proxy-aae
 COPY upstream .
 COPY .konflux/patches ./patches
-RUN set -e; for f in patches/*.patch; do echo ${f}; [[ -f ${f} ]] || continue; git apply ${f}; done
 ENV GODEBUG="http2server=0"
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=vendor -v -o /tmp/proxy-aae \
+ENV GOEXPERIMENT=strictfipsruntime
+
+RUN set -e; for f in patches/*.patch; do echo ${f}; [[ -f ${f} ]] || continue; git apply ${f}; done
+RUN CGO_ENABLED=1 go build -mod=vendor -tags disable_gcp,strictfipsruntime  -v -o /tmp/proxy-aae \
     ./cmd/proxy-server
 
 FROM $RUNTIME
-ARG VERSION=multicluster-proxy-aae-proxy-server-main
-
 WORKDIR /
 
 
