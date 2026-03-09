@@ -11,15 +11,15 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
-      == "next" &&
+      == "release-v1.15.x" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
       ".konflux/dockerfiles/multicluster-proxy-aae.Dockerfile".pathChanged() ||
-      ".tekton/multicluster-proxy-aae-next-multicluster-proxy-aae-pull-request.yaml".pathChanged())
+      ".tekton/multicluster-proxy-aae-1-15-multicluster-proxy-aae-pull-request.yaml".pathChanged())
   labels:
-    appstudio.openshift.io/application: openshift-pipelines-core-next
-    appstudio.openshift.io/component: multicluster-proxy-aae-next-multicluster-proxy-aae
+    appstudio.openshift.io/application: openshift-pipelines-core-1-15
+    appstudio.openshift.io/component: multicluster-proxy-aae-1-15-multicluster-proxy-aae
     pipelines.appstudio.openshift.io/type: build
-  name: multicluster-proxy-aae-next-multicluster-proxy-aae-on-pull-request
+  name: multicluster-proxy-aae-1-15-multicluster-proxy-aae-on-pull-request
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -37,7 +37,7 @@ spec:
     value: .konflux/dockerfiles/multicluster-proxy-aae.Dockerfile
   - name: additional-tags
     value:
-      - "on-pr-next"
+      - "on-pr-v1.15.5"
   - name: build-platforms
     value:
     - linux/x86_64
@@ -47,7 +47,7 @@ spec:
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-multicluster-proxy-aae-next-multicluster-proxy-aae
+    serviceAccountName: build-pipeline-multicluster-proxy-aae-1-15-multicluster-proxy-aae
   workspaces:
   - name: git-auth
     secret:
