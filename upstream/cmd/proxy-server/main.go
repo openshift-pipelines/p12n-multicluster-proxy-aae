@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"k8s.io/client-go/kubernetes"
@@ -22,13 +23,14 @@ import (
 func main() {
 	// Parse command line flags
 	var (
-		port                = flag.String("port", "8080", "Port to listen on")
-		workersSecretNS     = flag.String("workers-secret-namespace", "kueue-system", "Namespace for worker kubeconfig secrets")
-		requestTimeout      = flag.Duration("request-timeout", 30*time.Second, "Timeout for worker cluster requests")
-		defaultLogTailLines = flag.Int("default-log-tail-lines", 100, "Default number of log lines to tail")
-		kubeconfig          = flag.String("kubeconfig", "", "Path to kubeconfig file")
-		tlsCert             = flag.String("tls-cert", "", "Path to TLS certificate file")
-		tlsKey              = flag.String("tls-key", "", "Path to TLS key file")
+		defaultWorkersSecretNS = EnvOrDefault("WORKERS_SECRET_NAMESPACE", "kueue-system")
+		workersSecretNS        = flag.String("workers-secret-namespace", defaultWorkersSecretNS, "Namespace for worker kubeconfig secrets")
+		port                   = flag.String("port", "8080", "Port to listen on")
+		requestTimeout         = flag.Duration("request-timeout", 30*time.Second, "Timeout for worker cluster requests")
+		defaultLogTailLines    = flag.Int("default-log-tail-lines", 100, "Default number of log lines to tail")
+		kubeconfig             = flag.String("kubeconfig", "", "Path to kubeconfig file")
+		tlsCert                = flag.String("tls-cert", "", "Path to TLS certificate file")
+		tlsKey                 = flag.String("tls-key", "", "Path to TLS key file")
 	)
 	flag.Parse()
 
@@ -106,4 +108,13 @@ func loadKubeConfig(kubeconfigPath string) (*rest.Config, error) {
 
 	// Fall back to default kubeconfig
 	return clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
+}
+
+// EnvOrDefault Returns the value from the environment and if key is not present in environment
+// then fallback to defaultValue
+func EnvOrDefault(key, defaultValue string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	return defaultValue
 }
