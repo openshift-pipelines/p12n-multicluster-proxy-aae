@@ -128,5 +128,5 @@ help:
 .PHONY: release
 release: $(KUSTOMIZE)
 	mkdir -p ${RELEASE_DIR}
-	cd config/release && $(KUSTOMIZE) edit set image ko://github.com/openshift-pipelines/multicluster-proxy-aae/cmd/proxy-server=${IMG}:${VERSION}
+	cd config/release && $(KUSTOMIZE) edit set image ko://github.com/openshift-pipelines/multicluster-proxy-aae/cmd/proxy-server=${IMG}
 	$(KUSTOMIZE) build config/release -o ${RELEASE_DIR}/release-${VERSION}.yaml
