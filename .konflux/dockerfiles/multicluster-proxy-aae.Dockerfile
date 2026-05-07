@@ -1,4 +1,4 @@
-ARG GO_BUILDER=registry.access.redhat.com/ubi9/go-toolset:1.25
+ARG GO_BUILDER=registry.access.redhat.com/ubi8/go-toolset:latest
 ARG RUNTIME=registry.redhat.io/ubi9/ubi-minimal@sha256:c7d44146f826037f6873d99da479299b889473492d3c1ab8af86f08af04ec8a0
 
 FROM $GO_BUILDER AS builder
@@ -20,14 +20,14 @@ WORKDIR /
 COPY --from=builder /tmp/proxy-aae /ko-app/proxy-aae
 
 LABEL \
-    com.redhat.component="openshift-pipelines-multicluster-proxy-aae-rhel9-container" \
+    com.redhat.component="openshift-pipelines-multicluster-proxy-aae-rhel8-container" \
     cpe="cpe:/a:redhat:openshift_pipelines:1.15::el9" \
     description="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
     io.k8s.description="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
     io.k8s.display-name="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
     io.openshift.tags="tekton,openshift,multicluster-proxy-aae,multicluster-proxy-aae" \
     maintainer="pipelines-extcomm@redhat.com" \
-    name="openshift-pipelines/pipelines-multicluster-proxy-aae-rhel9" \
+    name="openshift-pipelines/pipelines-multicluster-proxy-aae-rhel8" \
     summary="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
     version="v1.15.5"
 
