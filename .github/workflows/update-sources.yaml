@@ -24,7 +24,7 @@ jobs:
         rm -fR upstream
         git clone https://github.com/openshift-pipelines/multicluster-proxy-aae upstream
         pushd upstream
-        git checkout -B release-v0.1.x origin/release-v0.1.x
+        git checkout -B release-v1.15.x origin/release-v1.15.x
         popd
     - name: Commit new changes
       run: |
