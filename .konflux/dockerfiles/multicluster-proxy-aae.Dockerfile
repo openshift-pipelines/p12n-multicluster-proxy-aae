@@ -29,7 +29,7 @@ LABEL \
     maintainer="pipelines-extcomm@redhat.com" \
     name="openshift-pipelines/pipelines-multicluster-proxy-aae-rhel9" \
     summary="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
-    version="v1.22.0"
+    version="v1.22.1"
 
 RUN microdnf install -y shadow-utils && \
     groupadd -r -g 65532 nonroot && useradd --no-log-init -r -u 65532 -g nonroot nonroot
