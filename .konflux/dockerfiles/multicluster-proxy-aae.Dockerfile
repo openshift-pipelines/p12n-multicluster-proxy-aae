@@ -21,7 +21,7 @@ COPY --from=builder /tmp/proxy-aae /ko-app/proxy-aae
 
 LABEL \
     com.redhat.component="openshift-pipelines-multicluster-proxy-aae-rhel10-container" \
-    cpe="cpe:/a:redhat:openshift_pipelines:nightly::el9" \
+    cpe="cpe:/a:redhat:openshift_pipelines:nightly::el10" \
     description="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
     io.k8s.description="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
     io.k8s.display-name="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
