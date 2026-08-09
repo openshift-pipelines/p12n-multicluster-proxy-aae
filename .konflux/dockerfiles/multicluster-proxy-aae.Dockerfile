@@ -1,4 +1,4 @@
-ARG GO_BUILDER=registry.access.redhat.com/ubi9/go-toolset:9.8-1781757851
+ARG GO_BUILDER=registry.access.redhat.com/ubi9/go-toolset:latest
 ARG RUNTIME=registry.redhat.io/ubi9/ubi-minimal@sha256:1bc3c5c15720506a0cf48adfdf8b623dfe704377e007d7bbae8d14876392ca6a
 
 FROM $GO_BUILDER AS builder
@@ -29,7 +29,7 @@ LABEL \
     maintainer="pipelines-extcomm@redhat.com" \
     name="openshift-pipelines/pipelines-multicluster-proxy-aae-rhel9" \
     summary="Red Hat OpenShift Pipelines multicluster-proxy-aae multicluster-proxy-aae" \
-    version="v1.24.0"
+    version="v1.24.0-RC-1"
 
 RUN microdnf install -y shadow-utils && \
     groupadd -r -g 65532 nonroot && useradd --no-log-init -r -u 65532 -g nonroot nonroot
