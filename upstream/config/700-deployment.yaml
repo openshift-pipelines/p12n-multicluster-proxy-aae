@@ -16,6 +16,10 @@ spec:
         app: proxy-aae
     spec:
       serviceAccountName: proxy-aae
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: proxy-aae
         image: ko://github.com/openshift-pipelines/multicluster-proxy-aae/cmd/proxy-server
@@ -41,6 +45,12 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
         volumeMounts:
         - name: tls-certs
           mountPath: "/etc/tls"
