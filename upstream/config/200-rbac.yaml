@@ -21,10 +21,6 @@ rules:
 - apiGroups: [""]
   resources: ["pods", "pods/log"]
   verbs: ["get", "list", "watch"]
-# Read Secrets (for worker kubeconfigs)
-- apiGroups: [""]
-  resources: ["secrets"]
-  verbs: ["get", "list", "watch"]
 # Create SelfSubjectAccessReview
 - apiGroups: ["authorization.k8s.io"]
   resources: ["selfsubjectaccessreviews"]
@@ -38,6 +34,31 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: proxy-aae
+subjects:
+- kind: ServiceAccount
+  name: proxy-aae
+  namespace: proxy-aae
+---
+# Namespace-scoped Role for reading worker kubeconfig secrets
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: proxy-aae-secrets-reader
+  namespace: kueue-system
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: proxy-aae-secrets-reader
+  namespace: kueue-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: proxy-aae-secrets-reader
 subjects:
 - kind: ServiceAccount
   name: proxy-aae
