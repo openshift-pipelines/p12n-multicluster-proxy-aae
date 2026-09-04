@@ -21,9 +21,13 @@ rules:
 - apiGroups: [""]
   resources: ["pods", "pods/log"]
   verbs: ["get", "list", "watch"]
-# Create SelfSubjectAccessReview
+# Create TokenReview (authenticate bearer tokens)
+- apiGroups: ["authentication.k8s.io"]
+  resources: ["tokenreviews"]
+  verbs: ["create"]
+# Create SubjectAccessReview(SAR) (authorize requests)
 - apiGroups: ["authorization.k8s.io"]
-  resources: ["selfsubjectaccessreviews"]
+  resources: ["subjectaccessreviews"]
   verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

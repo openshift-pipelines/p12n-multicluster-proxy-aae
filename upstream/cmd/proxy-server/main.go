@@ -28,6 +28,10 @@ func main() {
 		port                   = flag.String("port", "8080", "Port to listen on")
 		requestTimeout         = flag.Duration("request-timeout", 30*time.Second, "Timeout for worker cluster requests")
 		defaultLogTailLines    = flag.Int("default-log-tail-lines", 100, "Default number of log lines to tail")
+		clientQPS              = flag.Float64("client-qps", 50, "QPS for worker cluster clients")
+		clientBurst            = flag.Int("client-burst", 100, "Burst for worker cluster clients")
+		hubQPS                 = flag.Float64("hub-qps", 50, "QPS for hub cluster client (TokenReview/SubjectAccessReview)")
+		hubBurst               = flag.Int("hub-burst", 100, "Burst for hub cluster client (TokenReview/SubjectAccessReview)")
 		kubeconfig             = flag.String("kubeconfig", "", "Path to kubeconfig file")
 		tlsCert                = flag.String("tls-cert", "", "Path to TLS certificate file")
 		tlsKey                 = flag.String("tls-key", "", "Path to TLS key file")
@@ -44,6 +48,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load kubeconfig: %v", err)
 	}
+
+	cfg.QPS = float32(*hubQPS)
+	cfg.Burst = *hubBurst
 
 	// Create Kubernetes clients
 	kubeClient, err := kubernetes.NewForConfig(cfg)
@@ -62,6 +69,10 @@ func main() {
 		WorkersSecretNamespace: *workersSecretNS,
 		RequestTimeout:         *requestTimeout,
 		DefaultLogTailLines:    *defaultLogTailLines,
+		ClientQPS:              float32(*clientQPS),
+		ClientBurst:            *clientBurst,
+		HubQPS:                 float32(*hubQPS),
+		HubBurst:               *hubBurst,
 	}
 
 	// Initialize components
