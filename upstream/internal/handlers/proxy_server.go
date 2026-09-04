@@ -11,7 +11,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	"github.com/gorilla/websocket"
@@ -19,7 +18,6 @@ import (
 	"github.com/openshift-pipelines/multicluster-proxy-aae/internal/config"
 	"github.com/openshift-pipelines/multicluster-proxy-aae/internal/registry"
 	"github.com/openshift-pipelines/multicluster-proxy-aae/internal/resolver"
-	tektonclient "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 )
 
 // ProxyServer handles HTTP requests and proxies them to worker clusters
@@ -157,16 +155,12 @@ func (p *ProxyServer) handleTaskRuns(w http.ResponseWriter, r *http.Request, nam
 		return
 	}
 
-	// Get worker config
-	workerConfig, err := p.workerRegistry.GetConfig(workerCluster.Name)
+	tektonClient, err := p.workerRegistry.GetTektonClient(workerCluster.Name)
 	if err != nil {
-		klog.Errorf("Failed to get worker config for cluster %s: %v", workerCluster.Name, err)
-		http.Error(w, fmt.Sprintf("Worker config not found: %v", err), http.StatusFailedDependency)
+		klog.Errorf("Failed to get tekton client for cluster %s: %v", workerCluster.Name, err)
+		http.Error(w, fmt.Sprintf("Tekton client not available: %v", err), http.StatusFailedDependency)
 		return
 	}
-
-	// Create Tekton client for worker cluster
-	tektonClient := tektonclient.NewForConfigOrDie(workerConfig)
 
 	// List TaskRuns with label selector
 	labelSelector := fmt.Sprintf("tekton.dev/pipelineRun=%s", pipelineRunName)
@@ -204,16 +198,12 @@ func (p *ProxyServer) handlePipelineRunPods(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Get worker config
-	workerConfig, err := p.workerRegistry.GetConfig(workerCluster.Name)
+	kubeClient, err := p.workerRegistry.GetKubeClient(workerCluster.Name)
 	if err != nil {
-		klog.Errorf("Failed to get worker config for cluster %s: %v", workerCluster.Name, err)
-		http.Error(w, fmt.Sprintf("Worker config not found: %v", err), http.StatusFailedDependency)
+		klog.Errorf("Failed to get kube client for cluster %s: %v", workerCluster.Name, err)
+		http.Error(w, fmt.Sprintf("Kube client not available: %v", err), http.StatusFailedDependency)
 		return
 	}
-
-	// Create Kubernetes client for worker cluster
-	kubeClient := kubernetes.NewForConfigOrDie(workerConfig)
 
 	// List Pods with label selector
 	labelSelector := fmt.Sprintf("tekton.dev/pipelineRun=%s", pipelineRunName)
@@ -285,16 +275,12 @@ func (p *ProxyServer) handlePodStatus(w http.ResponseWriter, r *http.Request, na
 		return
 	}
 
-	// Get worker config
-	workerConfig, err := p.workerRegistry.GetConfig(workerCluster.Name)
+	kubeClient, err := p.workerRegistry.GetKubeClient(workerCluster.Name)
 	if err != nil {
-		klog.Errorf("Failed to get worker config for cluster %s: %v", workerCluster.Name, err)
-		http.Error(w, fmt.Sprintf("Worker config not found: %v", err), http.StatusFailedDependency)
+		klog.Errorf("Failed to get kube client for cluster %s: %v", workerCluster.Name, err)
+		http.Error(w, fmt.Sprintf("Kube client not available: %v", err), http.StatusFailedDependency)
 		return
 	}
-
-	// Create Kubernetes client for the worker cluster
-	kubeClient := kubernetes.NewForConfigOrDie(workerConfig)
 
 	// Get pod status from worker cluster
 	pod, err := kubeClient.CoreV1().Pods(namespace).Get(r.Context(), podName, v1.GetOptions{})
@@ -379,16 +365,12 @@ func (p *ProxyServer) handleLogsFetch(w http.ResponseWriter, r *http.Request, na
 		return
 	}
 
-	// Get worker config
-	workerConfig, err := p.workerRegistry.GetConfig(workerCluster.Name)
+	kubeClient, err := p.workerRegistry.GetKubeClient(workerCluster.Name)
 	if err != nil {
-		klog.Errorf("Failed to get worker config for cluster %s: %v", workerCluster.Name, err)
-		http.Error(w, fmt.Sprintf("Worker config not found: %v", err), http.StatusFailedDependency)
+		klog.Errorf("Failed to get kube client for cluster %s: %v", workerCluster.Name, err)
+		http.Error(w, fmt.Sprintf("Kube client not available: %v", err), http.StatusFailedDependency)
 		return
 	}
-
-	// Create Kubernetes client for the worker cluster
-	kubeClient := kubernetes.NewForConfigOrDie(workerConfig)
 
 	// Set up log options
 	logOptions := &corev1.PodLogOptions{
@@ -444,21 +426,17 @@ func (p *ProxyServer) handleLogsStream(w http.ResponseWriter, r *http.Request, n
 		return
 	}
 
-	// Get worker config
-	workerConfig, err := p.workerRegistry.GetConfig(workerCluster.Name)
+	kubeClient, err := p.workerRegistry.GetKubeClient(workerCluster.Name)
 	if err != nil {
-		klog.Errorf("Failed to get worker config for cluster %s: %v", workerCluster.Name, err)
-		http.Error(w, fmt.Sprintf("Worker config not found: %v", err), http.StatusFailedDependency)
+		klog.Errorf("Failed to get kube client for cluster %s: %v", workerCluster.Name, err)
+		http.Error(w, fmt.Sprintf("Kube client not available: %v", err), http.StatusFailedDependency)
 		return
 	}
-
-	// Create Kubernetes client for the worker cluster
-	kubeClient := kubernetes.NewForConfigOrDie(workerConfig)
 
 	// Set up log options for streaming
 	logOptions := &corev1.PodLogOptions{
 		Container: containerName,
-		Follow:    true, // Enable streaming
+		Follow:    true,
 	}
 
 	// Get logs stream from the worker cluster

@@ -12,7 +12,7 @@ This service exposes a manager-cluster-resident API that:
 ## Features
 
 - **Worker Cluster Resolution**: Uses Kueue Workload status to determine which worker cluster to proxy to
-- **Authorization**: Validates access using SelfSubjectAccessReview
+- **Authorization**: Validates access using TokenReview and SubjectAccessReview
 - **Log Streaming**: Supports both HTTP fetch and WebSocket streaming for logs
 - **Multi-Cluster Support**: Manages multiple worker clusters via kubeconfig secrets
 
@@ -53,12 +53,38 @@ make deploy
 
 ## Configuration
 
+### Command-Line Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `8080` | Port to listen on |
+| `--workers-secret-namespace` | `kueue-system` | Namespace for worker kubeconfig secrets |
+| `--request-timeout` | `30s` | Timeout for worker cluster requests |
+| `--default-log-tail-lines` | `100` | Default number of log lines to tail |
+| `--kubeconfig` | _(in-cluster)_ | Path to kubeconfig file |
+| `--tls-cert` | | Path to TLS certificate file |
+| `--tls-key` | | Path to TLS key file |
+| `--hub-qps` | `50` | QPS rate limit for hub cluster client (TokenReview/SubjectAccessReview) |
+| `--hub-burst` | `100` | Burst limit for hub cluster client (TokenReview/SubjectAccessReview) |
+| `--client-qps` | `50` | QPS rate limit for worker cluster clients |
+| `--client-burst` | `100` | Burst limit for worker cluster clients |
+
+#### Rate limiting
+
+Every incoming request requires two hub API calls (TokenReview + SubjectAccessReview), so the hub client's effective request throughput is roughly `hub-qps / 2` requests per second steady-state, bursting up to `hub-burst / 2`. The defaults (50 QPS / 100 burst) support ~25 req/s steady, bursting to ~50.
+
+Worker cluster rate limits apply independently per cluster. Tune them based on the number of concurrent proxy requests that fan out to a single worker.
+
+```bash
+# Example: higher hub throughput for a busy cluster
+go run ./cmd/proxy-server/main.go \
+  --hub-qps=100 --hub-burst=200 \
+  --client-qps=50 --client-burst=100
+```
+
 ### Environment Variables
 
 - `WORKERS_SECRET_NAMESPACE`: Namespace for worker kubeconfig secrets (default: `kueue-system`)
-- `REQUEST_TIMEOUT`: Timeout for worker cluster requests (default: `30s`)
-- `DEFAULT_LOG_TAIL_LINES`: Default number of log lines to tail (default: `100`)
-- `LOG_LEVEL`: Logging level (default: `2`)
 
 ### Worker Cluster Configuration
 
@@ -163,7 +189,7 @@ All responses include the `X-Worker-Cluster` header indicating which worker clus
 ### Error Codes
 
 - `401`: Unauthenticated
-- `403`: Forbidden (SSAR failed)
+- `403`: Forbidden SubjectAccessReview(SAR) denied
 - `404`: PipelineRun/Workload not found
 - `409`: Not admitted (includes nominated clusters)
 - `424`: Worker config missing/unreachable
@@ -177,7 +203,7 @@ All API endpoints (except `/health` and `/ready`) require a valid Kubernetes bea
 Authorization: Bearer ${TOKEN}
 ```
 
-The proxy validates the caller's permissions in the hub cluster using SelfSubjectAccessReview (SSAR). Requests without a valid token or sufficient permissions will return `403 Forbidden`.
+The proxy authenticates the caller's bearer token via TokenReview and authorizes the request via SubjectAccessReview (SAR) against the hub cluster. Requests without a valid token or sufficient permissions will return `401 Unauthenticated` or `403 Forbidden`.
 
 ## Development
 
@@ -207,7 +233,7 @@ The service consists of several components:
 
 - **WorkloadResolver**: Resolves worker clusters from Kueue Workload status
 - **WorkerConfigRegistry**: Manages worker cluster kubeconfigs
-- **AuthzHandler**: Handles authorization using SelfSubjectAccessReview
+- **AuthzHandler**: Handles authentication (TokenReview) and authorization (SubjectAccessReview)
 - **ProxyServer**: HTTP server that routes requests to appropriate worker clusters
 
 ## Contributing

@@ -6,14 +6,16 @@ import (
 	"net/http"
 	"strings"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 )
 
-// AuthzHandler handles authorization using SelfSubjectAccessReview
+// AuthzHandler handles authorization using SubjectAccessReview.
+// It uses the service account's client for all API calls, avoiding
+// per-request client construction.
 type AuthzHandler struct {
 	kubeClient kubernetes.Interface
 }
@@ -25,153 +27,146 @@ func NewAuthzHandler(kubeClient kubernetes.Interface) *AuthzHandler {
 	}
 }
 
+type resolvedIdentity struct {
+	Username string
+	UID      string
+	Groups   []string
+	Extra    map[string]authenticationv1.ExtraValue
+}
+
+// resolveToken validates a bearer token and returns the authenticated user
+// identity via TokenReview, using the service account's client.
+func (a *AuthzHandler) resolveToken(ctx context.Context, token string) (*resolvedIdentity, error) {
+	tr := &authenticationv1.TokenReview{
+		Spec: authenticationv1.TokenReviewSpec{
+			Token: token,
+		},
+	}
+
+	result, err := a.kubeClient.AuthenticationV1().TokenReviews().Create(ctx, tr, v1.CreateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("token review failed: %v", err)
+	}
+
+	if !result.Status.Authenticated {
+		return nil, fmt.Errorf("token is not authenticated")
+	}
+
+	return &resolvedIdentity{
+		Username: result.Status.User.Username,
+		UID:      result.Status.User.UID,
+		Groups:   result.Status.User.Groups,
+		Extra:    result.Status.User.Extra,
+	}, nil
+}
+
+// checkAccess performs a SubjectAccessReview for the given user against the
+// specified resource attributes, using the service account's client.
+func (a *AuthzHandler) checkAccess(ctx context.Context, id *resolvedIdentity, attrs *authorizationv1.ResourceAttributes) error {
+	extra := make(map[string]authorizationv1.ExtraValue, len(id.Extra))
+	for k, v := range id.Extra {
+		extra[k] = authorizationv1.ExtraValue(v)
+	}
+	sar := &authorizationv1.SubjectAccessReview{
+		Spec: authorizationv1.SubjectAccessReviewSpec{
+			ResourceAttributes: attrs,
+			User:               id.Username,
+			UID:                id.UID,
+			Groups:             id.Groups,
+			Extra:              extra,
+		},
+	}
+
+	result, err := a.kubeClient.AuthorizationV1().SubjectAccessReviews().Create(ctx, sar, v1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("subject access review failed: %v", err)
+	}
+
+	if !result.Status.Allowed {
+		return fmt.Errorf("access denied: %s", result.Status.Reason)
+	}
+
+	return nil
+}
+
 // CheckPipelineRunAccess checks if the caller can access a PipelineRun
 func (a *AuthzHandler) CheckPipelineRunAccess(ctx context.Context, r *http.Request, namespace, pipelineRunName string) error {
-	// Extract caller's token from Authorization header
 	callerToken := a.extractBearerToken(r)
 	if callerToken == "" {
 		return fmt.Errorf("no authorization token provided")
 	}
 
-	// Create a Kubernetes client with the caller's token
-	callerConfig := &rest.Config{
-		Host:        "https://kubernetes.default.svc", // Use in-cluster API server
-		BearerToken: callerToken,
-		TLSClientConfig: rest.TLSClientConfig{
-			Insecure: true, // For testing - should be configured properly in production
-		},
-	}
-
-	callerClient, err := kubernetes.NewForConfig(callerConfig)
+	id, err := a.resolveToken(ctx, callerToken)
 	if err != nil {
-		return fmt.Errorf("failed to create caller client: %v", err)
+		return err
 	}
 
-	// Create SelfSubjectAccessReview with caller's token
-	ssar := &authorizationv1.SelfSubjectAccessReview{
-		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
-			ResourceAttributes: &authorizationv1.ResourceAttributes{
-				Namespace: namespace,
-				Verb:      "get",
-				Group:     "tekton.dev",
-				Version:   "v1",
-				Resource:  "pipelineruns",
-				Name:      pipelineRunName,
-			},
-		},
+	if err := a.checkAccess(ctx, id, &authorizationv1.ResourceAttributes{
+		Namespace: namespace,
+		Verb:      "get",
+		Group:     "tekton.dev",
+		Version:   "v1",
+		Resource:  "pipelineruns",
+		Name:      pipelineRunName,
+	}); err != nil {
+		return err
 	}
 
-	// Submit the review using caller's client
-	result, err := callerClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, ssar, v1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create SelfSubjectAccessReview: %v", err)
-	}
-
-	if !result.Status.Allowed {
-		return fmt.Errorf("access denied to PipelineRun %s/%s: %s", namespace, pipelineRunName, result.Status.Reason)
-	}
-
-	klog.V(4).Infof("Access granted to PipelineRun %s/%s for caller", namespace, pipelineRunName)
+	klog.V(4).Infof("Access granted to PipelineRun %s/%s for user %s", namespace, pipelineRunName, id.Username)
 	return nil
 }
 
 // CheckPodAccess checks if the caller can access a Pod
 func (a *AuthzHandler) CheckPodAccess(ctx context.Context, r *http.Request, namespace, podName string) error {
-	// Extract caller's token from Authorization header
 	callerToken := a.extractBearerToken(r)
 	if callerToken == "" {
 		return fmt.Errorf("no authorization token provided")
 	}
 
-	// Create a Kubernetes client with the caller's token
-	callerConfig := &rest.Config{
-		Host:        "https://kubernetes.default.svc", // Use in-cluster API server
-		BearerToken: callerToken,
-		TLSClientConfig: rest.TLSClientConfig{
-			Insecure: true, // For testing - should be configured properly in production
-		},
-	}
-
-	callerClient, err := kubernetes.NewForConfig(callerConfig)
+	id, err := a.resolveToken(ctx, callerToken)
 	if err != nil {
-		return fmt.Errorf("failed to create caller client: %v", err)
+		return err
 	}
 
-	// Create SelfSubjectAccessReview with caller's token
-	ssar := &authorizationv1.SelfSubjectAccessReview{
-		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
-			ResourceAttributes: &authorizationv1.ResourceAttributes{
-				Namespace: namespace,
-				Verb:      "get",
-				Group:     "",
-				Version:   "v1",
-				Resource:  "pods",
-				Name:      podName,
-			},
-		},
+	if err := a.checkAccess(ctx, id, &authorizationv1.ResourceAttributes{
+		Namespace: namespace,
+		Verb:      "get",
+		Group:     "",
+		Version:   "v1",
+		Resource:  "pods",
+		Name:      podName,
+	}); err != nil {
+		return err
 	}
 
-	// Submit the review using caller's client
-	result, err := callerClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, ssar, v1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create SelfSubjectAccessReview: %v", err)
-	}
-
-	if !result.Status.Allowed {
-		return fmt.Errorf("access denied to Pod %s/%s: %s", namespace, podName, result.Status.Reason)
-	}
-
-	klog.V(4).Infof("Access granted to Pod %s/%s for caller", namespace, podName)
+	klog.V(4).Infof("Access granted to Pod %s/%s for user %s", namespace, podName, id.Username)
 	return nil
 }
 
 // CheckPodLogsAccess checks if the caller can access pod logs
 func (a *AuthzHandler) CheckPodLogsAccess(ctx context.Context, r *http.Request, namespace, podName string) error {
-	// Extract caller's token from Authorization header
 	callerToken := a.extractBearerToken(r)
 	if callerToken == "" {
 		return fmt.Errorf("no authorization token provided")
 	}
 
-	// Create a Kubernetes client with the caller's token
-	callerConfig := &rest.Config{
-		Host:        "https://kubernetes.default.svc", // Use in-cluster API server
-		BearerToken: callerToken,
-		TLSClientConfig: rest.TLSClientConfig{
-			Insecure: true, // For testing - should be configured properly in production
-		},
-	}
-
-	callerClient, err := kubernetes.NewForConfig(callerConfig)
+	id, err := a.resolveToken(ctx, callerToken)
 	if err != nil {
-		return fmt.Errorf("failed to create caller client: %v", err)
+		return err
 	}
 
-	// Create SelfSubjectAccessReview with caller's token
-	ssar := &authorizationv1.SelfSubjectAccessReview{
-		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
-			ResourceAttributes: &authorizationv1.ResourceAttributes{
-				Namespace: namespace,
-				Verb:      "get",
-				Group:     "",
-				Version:   "v1",
-				Resource:  "pods/log",
-				Name:      podName,
-			},
-		},
+	if err := a.checkAccess(ctx, id, &authorizationv1.ResourceAttributes{
+		Namespace: namespace,
+		Verb:      "get",
+		Group:     "",
+		Version:   "v1",
+		Resource:  "pods/log",
+		Name:      podName,
+	}); err != nil {
+		return err
 	}
 
-	// Submit the review using caller's client
-	result, err := callerClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, ssar, v1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create SelfSubjectAccessReview: %v", err)
-	}
-
-	if !result.Status.Allowed {
-		return fmt.Errorf("access denied to Pod logs %s/%s: %s", namespace, podName, result.Status.Reason)
-	}
-
-	klog.V(4).Infof("Access granted to Pod logs %s/%s for caller", namespace, podName)
+	klog.V(4).Infof("Access granted to Pod logs %s/%s for user %s", namespace, podName, id.Username)
 	return nil
 }
 
@@ -182,7 +177,6 @@ func (a *AuthzHandler) extractBearerToken(r *http.Request) string {
 		return ""
 	}
 
-	// Check if it's a bearer token
 	parts := strings.SplitN(authHeader, " ", 2)
 	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
 		return ""
