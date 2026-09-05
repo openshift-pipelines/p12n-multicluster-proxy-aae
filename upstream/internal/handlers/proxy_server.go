@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,28 +12,44 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
 	"github.com/gorilla/websocket"
-	"github.com/openshift-pipelines/multicluster-proxy-aae/internal/authz"
 	"github.com/openshift-pipelines/multicluster-proxy-aae/internal/config"
-	"github.com/openshift-pipelines/multicluster-proxy-aae/internal/registry"
 	"github.com/openshift-pipelines/multicluster-proxy-aae/internal/resolver"
+	tektonclient "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 )
+
+type authorizer interface {
+	CheckPipelineRunAccess(ctx context.Context, r *http.Request, namespace, name string) error
+	CheckPodAccess(ctx context.Context, r *http.Request, namespace, name string) error
+	CheckPodLogsAccess(ctx context.Context, r *http.Request, namespace, name string) error
+}
+
+type workloadResolver interface {
+	ResolveWorkerCluster(ctx context.Context, namespace, pipelineRunName string) (*resolver.WorkerCluster, error)
+}
+
+type workerConfigRegistry interface {
+	GetConfig(clusterName string) (*rest.Config, error)
+	ListClusters() []string
+}
 
 // ProxyServer handles HTTP requests and proxies them to worker clusters
 type ProxyServer struct {
-	resolver       *resolver.WorkloadResolver
-	workerRegistry *registry.WorkerConfigRegistry
-	authzHandler   *authz.AuthzHandler
+	resolver       workloadResolver
+	workerRegistry workerConfigRegistry
+	authzHandler   authorizer
 	config         *config.Config
 }
 
 // NewProxyServer creates a new ProxyServer
 func NewProxyServer(
-	resolver *resolver.WorkloadResolver,
-	workerRegistry *registry.WorkerConfigRegistry,
-	authzHandler *authz.AuthzHandler,
+	resolver workloadResolver,
+	workerRegistry workerConfigRegistry,
+	authzHandler authorizer,
 	config *config.Config,
 ) *ProxyServer {
 	return &ProxyServer{
@@ -142,25 +159,14 @@ func (p *ProxyServer) handleResolve(w http.ResponseWriter, r *http.Request, name
 
 // handleTaskRuns handles /taskruns endpoint
 func (p *ProxyServer) handleTaskRuns(w http.ResponseWriter, r *http.Request, namespace, pipelineRunName string) {
-	// Resolve worker cluster
-	workerCluster, err := p.resolver.ResolveWorkerCluster(r.Context(), namespace, pipelineRunName)
+	workerConfig, workerClusterName, err := p.getWorkerConfig(w, r, namespace, pipelineRunName)
 	if err != nil {
-		klog.Errorf("Failed to resolve worker cluster for PipelineRun %s/%s: %v", namespace, pipelineRunName, err)
-		http.Error(w, fmt.Sprintf("Failed to resolve worker cluster: %v", err), http.StatusNotFound)
+		klog.Error(err.Error())
 		return
 	}
 
-	if workerCluster.State != "Admitted" {
-		http.Error(w, "PipelineRun not admitted to worker cluster", http.StatusConflict)
-		return
-	}
-
-	tektonClient, err := p.workerRegistry.GetTektonClient(workerCluster.Name)
-	if err != nil {
-		klog.Errorf("Failed to get tekton client for cluster %s: %v", workerCluster.Name, err)
-		http.Error(w, fmt.Sprintf("Tekton client not available: %v", err), http.StatusFailedDependency)
-		return
-	}
+	// Create Tekton client for worker cluster
+	tektonClient := tektonclient.NewForConfigOrDie(workerConfig)
 
 	// List TaskRuns with label selector
 	labelSelector := fmt.Sprintf("tekton.dev/pipelineRun=%s", pipelineRunName)
@@ -175,7 +181,7 @@ func (p *ProxyServer) handleTaskRuns(w http.ResponseWriter, r *http.Request, nam
 
 	// Set response headers
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Worker-Cluster", workerCluster.Name)
+	w.Header().Set("X-Worker-Cluster", workerClusterName)
 
 	// Write response
 	if err := json.NewEncoder(w).Encode(taskRuns); err != nil {
@@ -185,25 +191,14 @@ func (p *ProxyServer) handleTaskRuns(w http.ResponseWriter, r *http.Request, nam
 
 // handlePipelineRunPods handles /pods endpoint for PipelineRun
 func (p *ProxyServer) handlePipelineRunPods(w http.ResponseWriter, r *http.Request, namespace, pipelineRunName string) {
-	// Resolve worker cluster
-	workerCluster, err := p.resolver.ResolveWorkerCluster(r.Context(), namespace, pipelineRunName)
+	workerConfig, workerClusterName, err := p.getWorkerConfig(w, r, namespace, pipelineRunName)
 	if err != nil {
-		klog.Errorf("Failed to resolve worker cluster for PipelineRun %s/%s: %v", namespace, pipelineRunName, err)
-		http.Error(w, fmt.Sprintf("Failed to resolve worker cluster: %v", err), http.StatusNotFound)
+		klog.Error(err.Error())
 		return
 	}
 
-	if workerCluster.State != "Admitted" {
-		http.Error(w, "PipelineRun not admitted to worker cluster", http.StatusConflict)
-		return
-	}
-
-	kubeClient, err := p.workerRegistry.GetKubeClient(workerCluster.Name)
-	if err != nil {
-		klog.Errorf("Failed to get kube client for cluster %s: %v", workerCluster.Name, err)
-		http.Error(w, fmt.Sprintf("Kube client not available: %v", err), http.StatusFailedDependency)
-		return
-	}
+	// Create Kubernetes client for worker cluster
+	kubeClient := kubernetes.NewForConfigOrDie(workerConfig)
 
 	// List Pods with label selector
 	labelSelector := fmt.Sprintf("tekton.dev/pipelineRun=%s", pipelineRunName)
@@ -218,7 +213,7 @@ func (p *ProxyServer) handlePipelineRunPods(w http.ResponseWriter, r *http.Reque
 
 	// Set response headers
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Worker-Cluster", workerCluster.Name)
+	w.Header().Set("X-Worker-Cluster", workerClusterName)
 
 	// Write response
 	if err := json.NewEncoder(w).Encode(pods); err != nil {
@@ -262,37 +257,37 @@ func (p *ProxyServer) handlePodStatus(w http.ResponseWriter, r *http.Request, na
 		return
 	}
 
-	// Resolve worker cluster using PipelineRun
-	workerCluster, err := p.resolver.ResolveWorkerCluster(r.Context(), namespace, pipelineRunName)
-	if err != nil {
-		klog.Errorf("Failed to resolve worker cluster for PipelineRun %s: %v", pipelineRunName, err)
-		http.Error(w, fmt.Sprintf("Failed to resolve worker cluster: %v", err), http.StatusInternalServerError)
+	// Authorize PipelineRun access before using it to resolve the worker cluster
+	if err := p.authzHandler.CheckPipelineRunAccess(r.Context(), r, namespace, pipelineRunName); err != nil {
+		http.Error(w, fmt.Sprintf("Access denied: %v", err), http.StatusForbidden)
 		return
 	}
 
-	if workerCluster.State != "Admitted" {
-		http.Error(w, "PipelineRun not admitted to worker cluster", http.StatusConflict)
+	workerConfig, workerClusterName, err := p.getWorkerConfig(w, r, namespace, pipelineRunName)
+	if err != nil {
+		klog.Error(err.Error())
 		return
 	}
 
-	kubeClient, err := p.workerRegistry.GetKubeClient(workerCluster.Name)
-	if err != nil {
-		klog.Errorf("Failed to get kube client for cluster %s: %v", workerCluster.Name, err)
-		http.Error(w, fmt.Sprintf("Kube client not available: %v", err), http.StatusFailedDependency)
-		return
-	}
+	// Create Kubernetes client for the worker cluster
+	kubeClient := kubernetes.NewForConfigOrDie(workerConfig)
 
 	// Get pod status from worker cluster
 	pod, err := kubeClient.CoreV1().Pods(namespace).Get(r.Context(), podName, v1.GetOptions{})
 	if err != nil {
-		klog.Errorf("Failed to get pod %s from worker cluster %s: %v", podName, workerCluster.Name, err)
+		klog.Errorf("Failed to get pod %s from worker cluster %s: %v", podName, workerClusterName, err)
 		http.Error(w, fmt.Sprintf("Failed to get pod: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if pod.Labels["tekton.dev/pipelineRun"] != pipelineRunName {
+		http.Error(w, "Pod does not belong to the specified PipelineRun", http.StatusForbidden)
 		return
 	}
 
 	// Set response headers
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Worker-Cluster", workerCluster.Name)
+	w.Header().Set("X-Worker-Cluster", workerClusterName)
 
 	// Write response - only return the status portion
 	if err := json.NewEncoder(w).Encode(pod.Status); err != nil {
@@ -305,6 +300,11 @@ func (p *ProxyServer) handleLogsRequest(w http.ResponseWriter, r *http.Request, 
 	// Parse query parameters
 	podName := r.URL.Query().Get("pod")
 	containerName := r.URL.Query().Get("container")
+	// Extract PipelineRun name from the route parameter
+	// The logs endpoint should be called as: /api/v1/namespaces/{ns}/pipelineruns/{name}/logs?pod={podName}&container={container}
+	// But for now, we'll extract it from the URL path
+	// TODO: Update the route to include PipelineRun name as a path parameter
+	pipelineRunName := r.URL.Query().Get("pipelineRun")
 
 	if podName == "" {
 		http.Error(w, "Pod name is required", http.StatusBadRequest)
@@ -317,16 +317,49 @@ func (p *ProxyServer) handleLogsRequest(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	if pipelineRunName == "" {
+		http.Error(w, "PipelineRun name must be provided as query parameter 'pipelineRun'", http.StatusBadRequest)
+		return
+	}
+
+	// Authorize PipelineRun access before using it to resolve the worker cluster
+	if err := p.authzHandler.CheckPipelineRunAccess(r.Context(), r, namespace, pipelineRunName); err != nil {
+		http.Error(w, fmt.Sprintf("Access denied: %v", err), http.StatusForbidden)
+		return
+	}
+
+	workerConfig, workerClusterName, err := p.getWorkerConfig(w, r, namespace, pipelineRunName)
+	if err != nil {
+		klog.Error(err.Error())
+		return
+	}
+
+	// Create Kubernetes client for the worker cluster
+	kubeClient := kubernetes.NewForConfigOrDie(workerConfig)
+
+	// Verify pod belongs to the specified PipelineRun
+	pod, err := kubeClient.CoreV1().Pods(namespace).Get(r.Context(), podName, v1.GetOptions{})
+	if err != nil {
+		klog.Errorf("Failed to get pod %s from worker cluster %s: %v", podName, workerClusterName, err)
+		http.Error(w, fmt.Sprintf("Failed to get pod: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if pod.Labels["tekton.dev/pipelineRun"] != pipelineRunName {
+		http.Error(w, "Pod does not belong to the specified PipelineRun", http.StatusForbidden)
+		return
+	}
+
 	// Route to specific handler
 	if strings.HasSuffix(resourcePath, "/stream") {
-		p.handleLogsStream(w, r, namespace, podName, containerName)
+		p.handleLogsStream(w, r, namespace, podName, containerName, workerClusterName, *kubeClient)
 	} else {
-		p.handleLogsFetch(w, r, namespace, podName, containerName)
+		p.handleLogsFetch(w, r, namespace, podName, containerName, workerClusterName, *kubeClient)
 	}
 }
 
 // handleLogsFetch handles HTTP logs fetching
-func (p *ProxyServer) handleLogsFetch(w http.ResponseWriter, r *http.Request, namespace, podName, containerName string) {
+func (p *ProxyServer) handleLogsFetch(w http.ResponseWriter, r *http.Request, namespace, podName, containerName, workerClusterName string, kubeClient kubernetes.Clientset) {
 	// Parse query parameters
 	sinceSeconds := int64(0)
 	if sinceStr := r.URL.Query().Get("sinceSeconds"); sinceStr != "" {
@@ -340,36 +373,6 @@ func (p *ProxyServer) handleLogsFetch(w http.ResponseWriter, r *http.Request, na
 		if tail, err := strconv.ParseInt(tailStr, 10, 64); err == nil {
 			tailLines = tail
 		}
-	}
-
-	// Extract PipelineRun name from the route parameter
-	// The logs endpoint should be called as: /api/v1/namespaces/{ns}/pipelineruns/{name}/logs?pod={podName}&container={container}
-	// But for now, we'll extract it from the URL path
-	// TODO: Update the route to include PipelineRun name as a path parameter
-	pipelineRunName := r.URL.Query().Get("pipelineRun")
-	if pipelineRunName == "" {
-		http.Error(w, "PipelineRun name must be provided as query parameter 'pipelineRun'", http.StatusBadRequest)
-		return
-	}
-
-	// Resolve worker cluster using PipelineRun
-	workerCluster, err := p.resolver.ResolveWorkerCluster(r.Context(), namespace, pipelineRunName)
-	if err != nil {
-		klog.Errorf("Failed to resolve worker cluster for PipelineRun %s: %v", pipelineRunName, err)
-		http.Error(w, fmt.Sprintf("Failed to resolve worker cluster: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	if workerCluster.State != "Admitted" {
-		http.Error(w, "PipelineRun not admitted to worker cluster", http.StatusConflict)
-		return
-	}
-
-	kubeClient, err := p.workerRegistry.GetKubeClient(workerCluster.Name)
-	if err != nil {
-		klog.Errorf("Failed to get kube client for cluster %s: %v", workerCluster.Name, err)
-		http.Error(w, fmt.Sprintf("Kube client not available: %v", err), http.StatusFailedDependency)
-		return
 	}
 
 	// Set up log options
@@ -386,7 +389,7 @@ func (p *ProxyServer) handleLogsFetch(w http.ResponseWriter, r *http.Request, na
 	req := kubeClient.CoreV1().Pods(namespace).GetLogs(podName, logOptions)
 	logs, err := req.Stream(r.Context())
 	if err != nil {
-		klog.Errorf("Failed to get logs from worker cluster %s: %v", workerCluster.Name, err)
+		klog.Errorf("Failed to get logs from worker cluster %s: %v", workerClusterName, err)
 		http.Error(w, fmt.Sprintf("Failed to get logs: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -394,7 +397,7 @@ func (p *ProxyServer) handleLogsFetch(w http.ResponseWriter, r *http.Request, na
 
 	// Set response headers
 	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("X-Worker-Cluster", workerCluster.Name)
+	w.Header().Set("X-Worker-Cluster", workerClusterName)
 	w.WriteHeader(http.StatusOK)
 
 	// Stream logs to client
@@ -405,34 +408,7 @@ func (p *ProxyServer) handleLogsFetch(w http.ResponseWriter, r *http.Request, na
 }
 
 // handleLogsStream handles WebSocket logs streaming
-func (p *ProxyServer) handleLogsStream(w http.ResponseWriter, r *http.Request, namespace, podName, containerName string) {
-	// Extract PipelineRun name from query parameter
-	pipelineRunName := r.URL.Query().Get("pipelineRun")
-	if pipelineRunName == "" {
-		http.Error(w, "PipelineRun name must be provided as query parameter 'pipelineRun'", http.StatusBadRequest)
-		return
-	}
-
-	// Resolve worker cluster using PipelineRun
-	workerCluster, err := p.resolver.ResolveWorkerCluster(r.Context(), namespace, pipelineRunName)
-	if err != nil {
-		klog.Errorf("Failed to resolve worker cluster for PipelineRun %s: %v", pipelineRunName, err)
-		http.Error(w, fmt.Sprintf("Failed to resolve worker cluster: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	if workerCluster.State != "Admitted" {
-		http.Error(w, "PipelineRun not admitted to worker cluster", http.StatusConflict)
-		return
-	}
-
-	kubeClient, err := p.workerRegistry.GetKubeClient(workerCluster.Name)
-	if err != nil {
-		klog.Errorf("Failed to get kube client for cluster %s: %v", workerCluster.Name, err)
-		http.Error(w, fmt.Sprintf("Kube client not available: %v", err), http.StatusFailedDependency)
-		return
-	}
-
+func (p *ProxyServer) handleLogsStream(w http.ResponseWriter, r *http.Request, namespace, podName, containerName, workerClusterName string, kubeClient kubernetes.Clientset) {
 	// Set up log options for streaming
 	logOptions := &corev1.PodLogOptions{
 		Container: containerName,
@@ -443,7 +419,7 @@ func (p *ProxyServer) handleLogsStream(w http.ResponseWriter, r *http.Request, n
 	req := kubeClient.CoreV1().Pods(namespace).GetLogs(podName, logOptions)
 	logs, err := req.Stream(r.Context())
 	if err != nil {
-		klog.Errorf("Failed to get logs stream from worker cluster %s: %v", workerCluster.Name, err)
+		klog.Errorf("Failed to get logs stream from worker cluster %s: %v", workerClusterName, err)
 		http.Error(w, fmt.Sprintf("Failed to get logs stream: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -501,4 +477,29 @@ func (p *ProxyServer) handleReady(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Ready"))
+}
+
+func (p *ProxyServer) getWorkerConfig(w http.ResponseWriter, r *http.Request, namespace, pipelineRunName string) (*rest.Config, string, error) {
+
+	// Resolve worker cluster using PipelineRun
+	workerCluster, err := p.resolver.ResolveWorkerCluster(r.Context(), namespace, pipelineRunName)
+	if err != nil {
+		klog.Errorf("Failed to resolve worker cluster for PipelineRun %s/%s: %v", namespace, pipelineRunName, err)
+		http.Error(w, fmt.Sprintf("Failed to resolve worker cluster: %v", err), http.StatusNotFound)
+		return nil, "", fmt.Errorf("failed to resolve worker cluster: %v", err)
+	}
+
+	if workerCluster.State != "Admitted" {
+		http.Error(w, "PipelineRun not admitted to worker cluster", http.StatusConflict)
+		return nil, "", fmt.Errorf("PipelineRun not admitted to worker cluster")
+	}
+
+	// Get worker config
+	workerConfig, err := p.workerRegistry.GetConfig(workerCluster.Name)
+	if err != nil {
+		klog.Errorf("Failed to get worker config for cluster %s: %v", workerCluster.Name, err)
+		http.Error(w, fmt.Sprintf("Worker config not found: %v", err), http.StatusFailedDependency)
+		return nil, "", fmt.Errorf("worker config not found: %v", err)
+	}
+	return workerConfig, workerCluster.Name, nil
 }
