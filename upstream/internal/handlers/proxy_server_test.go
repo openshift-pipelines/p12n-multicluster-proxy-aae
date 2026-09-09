@@ -18,19 +18,31 @@ import (
 )
 
 type mockAuthorizer struct {
-	err error
+	pipelineRunErr error
+	podErr         error
+	podLogsErr     error
+	taskRunListErr error
+	podListErr     error
 }
 
 func (m *mockAuthorizer) CheckPipelineRunAccess(_ context.Context, _ *http.Request, _, _ string) error {
-	return m.err
+	return m.pipelineRunErr
 }
 
 func (m *mockAuthorizer) CheckPodAccess(_ context.Context, _ *http.Request, _, _ string) error {
-	return m.err
+	return m.podErr
 }
 
 func (m *mockAuthorizer) CheckPodLogsAccess(_ context.Context, _ *http.Request, _, _ string) error {
-	return m.err
+	return m.podLogsErr
+}
+
+func (m *mockAuthorizer) CheckTaskRunListAccess(_ context.Context, _ *http.Request, _ string) error {
+	return m.taskRunListErr
+}
+
+func (m *mockAuthorizer) CheckPodListAccess(_ context.Context, _ *http.Request, _ string) error {
+	return m.podListErr
 }
 
 type mockResolver struct {
@@ -64,8 +76,34 @@ func (m *mockRegistry) ListClusters() []string {
 
 func fakeWorkerAPI(pods map[string]*corev1.Pod, logs map[string]string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Handle TaskRun listing: GET /apis/tekton.dev/v1/namespaces/{ns}/taskruns
+		if strings.HasPrefix(r.URL.Path, "/apis/tekton.dev/v1/namespaces/") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"apiVersion":"tekton.dev/v1","kind":"TaskRunList","metadata":{},"items":[]}`)
+			return
+		}
+
+		if !strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/namespaces/")
 		parts := strings.Split(path, "/")
+
+		// Pod listing: GET /api/v1/namespaces/{ns}/pods
+		if len(parts) == 2 && parts[1] == "pods" {
+			ns := parts[0]
+			podList := &corev1.PodList{}
+			for key, pod := range pods {
+				if strings.HasPrefix(key, ns+"/") {
+					podList.Items = append(podList.Items, *pod)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(podList)
+			return
+		}
 
 		if len(parts) >= 3 && parts[1] == "pods" {
 			key := parts[0] + "/" + parts[2]
@@ -254,7 +292,7 @@ func TestPodStatus_AuthDenied(t *testing.T) {
 	defer worker.Close()
 
 	server := newTestServer(worker.URL)
-	server.authzHandler = &mockAuthorizer{err: fmt.Errorf("access denied")}
+	server.authzHandler = &mockAuthorizer{podErr: fmt.Errorf("access denied")}
 
 	req := httptest.NewRequest("GET",
 		"/api/v1/namespaces/test-ns/pods/test-pod/status?pipelineRun=my-pr", nil)
@@ -369,7 +407,7 @@ func TestLogsRequest_AuthDenied(t *testing.T) {
 	defer worker.Close()
 
 	server := newTestServer(worker.URL)
-	server.authzHandler = &mockAuthorizer{err: fmt.Errorf("access denied")}
+	server.authzHandler = &mockAuthorizer{podLogsErr: fmt.Errorf("access denied")}
 
 	req := httptest.NewRequest("GET",
 		"/api/v1/namespaces/test-ns/logs?pod=test-pod&container=step-main&pipelineRun=my-pr", nil)
@@ -400,5 +438,340 @@ func TestPodStatus_WorkerClusterNotAdmitted(t *testing.T) {
 
 	if rr.Code != http.StatusConflict {
 		t.Errorf("got status %d, want %d", rr.Code, http.StatusConflict)
+	}
+}
+
+func TestNamespaceRequest_InvalidPath(t *testing.T) {
+	server := &ProxyServer{config: &config.Config{}, authzHandler: &mockAuthorizer{}}
+
+	req := httptest.NewRequest("GET", "/api/v1/namespaces/test-ns", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestNamespaceRequest_UnknownResource(t *testing.T) {
+	server := &ProxyServer{config: &config.Config{}, authzHandler: &mockAuthorizer{}}
+
+	req := httptest.NewRequest("GET", "/api/v1/namespaces/test-ns/unknown", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
+func TestPipelineRunRequest_AuthDenied(t *testing.T) {
+	server := &ProxyServer{
+		config:       &config.Config{},
+		authzHandler: &mockAuthorizer{pipelineRunErr: fmt.Errorf("access denied")},
+	}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pipelineruns/my-pr/resolve", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusForbidden)
+	}
+}
+
+func TestPipelineRunRequest_UnknownSubResource(t *testing.T) {
+	server := &ProxyServer{
+		config:       &config.Config{},
+		authzHandler: &mockAuthorizer{},
+	}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pipelineruns/my-pr/unknown", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
+func TestPodRequest_UnknownSubResource(t *testing.T) {
+	server := &ProxyServer{
+		config:       &config.Config{},
+		authzHandler: &mockAuthorizer{},
+	}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pods/my-pod/unknown", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
+func TestResolve_Admitted(t *testing.T) {
+	server := &ProxyServer{
+		resolver: &mockResolver{
+			cluster: &resolver.WorkerCluster{Name: "worker-1", State: "Admitted", WorkloadName: "wl-1"},
+		},
+		authzHandler: &mockAuthorizer{},
+		config:       &config.Config{},
+	}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pipelineruns/my-pr/resolve", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("got status %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	if got := rr.Header().Get("X-Worker-Cluster"); got != "worker-1" {
+		t.Errorf("got X-Worker-Cluster %q, want %q", got, "worker-1")
+	}
+
+	var wc resolver.WorkerCluster
+	if err := json.NewDecoder(rr.Body).Decode(&wc); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if wc.State != "Admitted" {
+		t.Errorf("got state %q, want %q", wc.State, "Admitted")
+	}
+	if wc.Name != "worker-1" {
+		t.Errorf("got name %q, want %q", wc.Name, "worker-1")
+	}
+}
+
+func TestResolve_Dispatching(t *testing.T) {
+	server := &ProxyServer{
+		resolver: &mockResolver{
+			cluster: &resolver.WorkerCluster{State: "Dispatching", WorkloadName: "wl-1"},
+		},
+		authzHandler: &mockAuthorizer{},
+		config:       &config.Config{},
+	}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pipelineruns/my-pr/resolve", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusConflict)
+	}
+
+	var wc resolver.WorkerCluster
+	if err := json.NewDecoder(rr.Body).Decode(&wc); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if wc.State != "Dispatching" {
+		t.Errorf("got state %q, want %q", wc.State, "Dispatching")
+	}
+}
+
+func TestResolve_Error(t *testing.T) {
+	server := &ProxyServer{
+		resolver: &mockResolver{
+			err: fmt.Errorf("workload not found"),
+		},
+		authzHandler: &mockAuthorizer{},
+		config:       &config.Config{},
+	}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pipelineruns/my-pr/resolve", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
+func TestPipelineRunPods_AuthDenied(t *testing.T) {
+	worker := fakeWorkerAPI(nil, nil)
+	defer worker.Close()
+
+	server := newTestServer(worker.URL)
+	server.authzHandler = &mockAuthorizer{podListErr: fmt.Errorf("access denied")}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pipelineruns/my-pr/pods", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusForbidden)
+	}
+}
+
+func TestTaskRuns_Success(t *testing.T) {
+	worker := fakeWorkerAPI(nil, nil)
+	defer worker.Close()
+
+	server := newTestServer(worker.URL)
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pipelineruns/my-pr/taskruns", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("got status %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	if got := rr.Header().Get("X-Worker-Cluster"); got != "worker-1" {
+		t.Errorf("got X-Worker-Cluster %q, want %q", got, "worker-1")
+	}
+
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("got Content-Type %q, want %q", ct, "application/json")
+	}
+}
+
+func TestTaskRuns_AuthDenied(t *testing.T) {
+	worker := fakeWorkerAPI(nil, nil)
+	defer worker.Close()
+
+	server := newTestServer(worker.URL)
+	server.authzHandler = &mockAuthorizer{taskRunListErr: fmt.Errorf("access denied")}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pipelineruns/my-pr/taskruns", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusForbidden)
+	}
+}
+
+func TestGetWorkerConfig_ResolverError(t *testing.T) {
+	worker := fakeWorkerAPI(nil, nil)
+	defer worker.Close()
+
+	server := newTestServer(worker.URL)
+	server.resolver = &mockResolver{err: fmt.Errorf("resolve failed")}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pipelineruns/my-pr/pods", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
+func TestGetWorkerConfig_RegistryError(t *testing.T) {
+	worker := fakeWorkerAPI(nil, nil)
+	defer worker.Close()
+
+	server := newTestServer(worker.URL)
+	server.workerRegistry = &mockRegistry{
+		err:      fmt.Errorf("config not found"),
+		clusters: []string{"worker-1"},
+	}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pipelineruns/my-pr/pods", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusFailedDependency {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusFailedDependency)
+	}
+}
+
+func TestLogs_WorkerClusterNotAdmitted(t *testing.T) {
+	worker := fakeWorkerAPI(nil, nil)
+	defer worker.Close()
+
+	server := newTestServer(worker.URL)
+	server.resolver = &mockResolver{
+		cluster: &resolver.WorkerCluster{Name: "worker-1", State: "Dispatching"},
+	}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/logs?pod=test-pod&container=step-main&pipelineRun=my-pr", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusConflict)
+	}
+}
+
+func TestLogs_PipelineRunAuthDenied(t *testing.T) {
+	worker := fakeWorkerAPI(nil, nil)
+	defer worker.Close()
+
+	server := newTestServer(worker.URL)
+	server.authzHandler = &mockAuthorizer{pipelineRunErr: fmt.Errorf("access denied")}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/logs?pod=test-pod&container=step-main&pipelineRun=my-pr", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusForbidden)
+	}
+}
+
+func TestPodStatus_PipelineRunAuthDenied(t *testing.T) {
+	worker := fakeWorkerAPI(nil, nil)
+	defer worker.Close()
+
+	server := newTestServer(worker.URL)
+	server.authzHandler = &mockAuthorizer{pipelineRunErr: fmt.Errorf("access denied")}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pods/test-pod/status?pipelineRun=my-pr", nil)
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusForbidden)
+	}
+}
+
+func TestPodStatus_ResolverError(t *testing.T) {
+	worker := fakeWorkerAPI(nil, nil)
+	defer worker.Close()
+
+	server := newTestServer(worker.URL)
+	server.resolver = &mockResolver{err: fmt.Errorf("resolve failed")}
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/namespaces/test-ns/pods/test-pod/status?pipelineRun=my-pr", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	rr := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("got status %d, want %d", rr.Code, http.StatusNotFound)
 	}
 }

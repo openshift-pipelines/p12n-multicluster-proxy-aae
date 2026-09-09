@@ -170,6 +170,58 @@ func (a *AuthzHandler) CheckPodLogsAccess(ctx context.Context, r *http.Request, 
 	return nil
 }
 
+// CheckTaskRunListAccess checks if the caller can list TaskRuns in a namespace
+func (a *AuthzHandler) CheckTaskRunListAccess(ctx context.Context, r *http.Request, namespace string) error {
+	callerToken := a.extractBearerToken(r)
+	if callerToken == "" {
+		return fmt.Errorf("no authorization token provided")
+	}
+
+	id, err := a.resolveToken(ctx, callerToken)
+	if err != nil {
+		return err
+	}
+
+	if err := a.checkAccess(ctx, id, &authorizationv1.ResourceAttributes{
+		Namespace: namespace,
+		Verb:      "list",
+		Group:     "tekton.dev",
+		Version:   "v1",
+		Resource:  "taskruns",
+	}); err != nil {
+		return err
+	}
+
+	klog.V(4).Infof("Access granted to list TaskRuns in %s for user %s", namespace, id.Username)
+	return nil
+}
+
+// CheckPodListAccess checks if the caller can list Pods in a namespace
+func (a *AuthzHandler) CheckPodListAccess(ctx context.Context, r *http.Request, namespace string) error {
+	callerToken := a.extractBearerToken(r)
+	if callerToken == "" {
+		return fmt.Errorf("no authorization token provided")
+	}
+
+	id, err := a.resolveToken(ctx, callerToken)
+	if err != nil {
+		return err
+	}
+
+	if err := a.checkAccess(ctx, id, &authorizationv1.ResourceAttributes{
+		Namespace: namespace,
+		Verb:      "list",
+		Group:     "",
+		Version:   "v1",
+		Resource:  "pods",
+	}); err != nil {
+		return err
+	}
+
+	klog.V(4).Infof("Access granted to list Pods in %s for user %s", namespace, id.Username)
+	return nil
+}
+
 // extractBearerToken extracts the bearer token from the Authorization header
 func (a *AuthzHandler) extractBearerToken(r *http.Request) string {
 	authHeader := r.Header.Get("Authorization")
