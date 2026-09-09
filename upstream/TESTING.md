@@ -55,7 +55,7 @@ curl -k -v -H "Authorization: Bearer invalid-token" \
   "https://localhost:8080/api/v1/namespaces/default/pipelineruns/pipeline-test/resolve"
 ```
 
-**Expected Result**: `403 Forbidden` with message "failed to create SelfSubjectAccessReview: Unauthorized"
+**Expected Result**: `403 Forbidden` with a token authentication failure
 
 ### 4. Test With Valid Token (Should Succeed)
 
