@@ -26,6 +26,8 @@ type authorizer interface {
 	CheckPipelineRunAccess(ctx context.Context, r *http.Request, namespace, name string) error
 	CheckPodAccess(ctx context.Context, r *http.Request, namespace, name string) error
 	CheckPodLogsAccess(ctx context.Context, r *http.Request, namespace, name string) error
+	CheckTaskRunListAccess(ctx context.Context, r *http.Request, namespace string) error
+	CheckPodListAccess(ctx context.Context, r *http.Request, namespace string) error
 }
 
 type workloadResolver interface {
@@ -159,6 +161,12 @@ func (p *ProxyServer) handleResolve(w http.ResponseWriter, r *http.Request, name
 
 // handleTaskRuns handles /taskruns endpoint
 func (p *ProxyServer) handleTaskRuns(w http.ResponseWriter, r *http.Request, namespace, pipelineRunName string) {
+	// Check authorization
+	if err := p.authzHandler.CheckTaskRunListAccess(r.Context(), r, namespace); err != nil {
+		http.Error(w, fmt.Sprintf("Access denied: %v", err), http.StatusForbidden)
+		return
+	}
+
 	workerConfig, workerClusterName, err := p.getWorkerConfig(w, r, namespace, pipelineRunName)
 	if err != nil {
 		klog.Error(err.Error())
@@ -191,6 +199,12 @@ func (p *ProxyServer) handleTaskRuns(w http.ResponseWriter, r *http.Request, nam
 
 // handlePipelineRunPods handles /pods endpoint for PipelineRun
 func (p *ProxyServer) handlePipelineRunPods(w http.ResponseWriter, r *http.Request, namespace, pipelineRunName string) {
+	// Check authorization
+	if err := p.authzHandler.CheckPodListAccess(r.Context(), r, namespace); err != nil {
+		http.Error(w, fmt.Sprintf("Access denied: %v", err), http.StatusForbidden)
+		return
+	}
+
 	workerConfig, workerClusterName, err := p.getWorkerConfig(w, r, namespace, pipelineRunName)
 	if err != nil {
 		klog.Error(err.Error())
