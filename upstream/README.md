@@ -12,7 +12,7 @@ This service exposes a manager-cluster-resident API that:
 ## Features
 
 - **Worker Cluster Resolution**: Uses Kueue Workload status to determine which worker cluster to proxy to
-- **Authorization**: Validates access using SelfSubjectAccessReview
+- **Authorization**: Validates bearer tokens with TokenReview and access with SubjectAccessReview
 - **Log Streaming**: Supports both HTTP fetch and WebSocket streaming for logs
 - **Multi-Cluster Support**: Manages multiple worker clusters via kubeconfig secrets
 
@@ -52,6 +52,10 @@ make deploy
 ```
 
 ## Configuration
+
+### Hub API rate limiting
+
+Each authenticated request makes a TokenReview and SubjectAccessReview through the shared hub client. `--hub-qps` (default `50`) and `--hub-burst` (default `100`) control that client's rate limits.
 
 ### Environment Variables
 
@@ -163,7 +167,7 @@ All responses include the `X-Worker-Cluster` header indicating which worker clus
 ### Error Codes
 
 - `401`: Unauthenticated
-- `403`: Forbidden (SSAR failed)
+- `403`: Forbidden (authentication or authorization failed)
 - `404`: PipelineRun/Workload not found
 - `409`: Not admitted (includes nominated clusters)
 - `424`: Worker config missing/unreachable
@@ -177,7 +181,7 @@ All API endpoints (except `/health` and `/ready`) require a valid Kubernetes bea
 Authorization: Bearer ${TOKEN}
 ```
 
-The proxy validates the caller's permissions in the hub cluster using SelfSubjectAccessReview (SSAR). Requests without a valid token or sufficient permissions will return `403 Forbidden`.
+The proxy validates the bearer token with TokenReview, then checks the authenticated caller's permissions in the hub cluster with SubjectAccessReview. Requests without a valid token or sufficient permissions return `403 Forbidden`.
 
 ## Development
 
@@ -207,7 +211,7 @@ The service consists of several components:
 
 - **WorkloadResolver**: Resolves worker clusters from Kueue Workload status
 - **WorkerConfigRegistry**: Manages worker cluster kubeconfigs
-- **AuthzHandler**: Handles authorization using SelfSubjectAccessReview
+- **AuthzHandler**: Handles authentication with TokenReview and authorization with SubjectAccessReview
 - **ProxyServer**: HTTP server that routes requests to appropriate worker clusters
 
 ## Contributing
