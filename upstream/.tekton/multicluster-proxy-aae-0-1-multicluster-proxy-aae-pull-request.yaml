@@ -1,4 +1,4 @@
-# Generated for Konflux Application multicluster-proxy-aae by openshift-pipelines/hack. DO NOT EDIT
+# Generated for Konflux Application multicluster-pipelines-core by openshift-pipelines/hack. DO NOT EDIT
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -16,7 +16,7 @@ metadata:
       "Dockerfile".pathChanged() ||
       ".tekton/multicluster-proxy-aae-0-1-multicluster-proxy-aae-pull-request.yaml".pathChanged())
   labels:
-    appstudio.openshift.io/application: multicluster-proxy-aae-0-1
+    appstudio.openshift.io/application: multicluster-pipelines-core-0-1
     appstudio.openshift.io/component: multicluster-proxy-aae-0-1-multicluster-proxy-aae
     pipelines.appstudio.openshift.io/type: build
   name: multicluster-proxy-aae-0-1-multicluster-proxy-aae-on-pull-request

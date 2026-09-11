@@ -25,9 +25,13 @@ rules:
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get", "list", "watch"]
-# Create SelfSubjectAccessReview
+# Authenticate caller bearer tokens
+- apiGroups: ["authentication.k8s.io"]
+  resources: ["tokenreviews"]
+  verbs: ["create"]
+# Authorize authenticated callers
 - apiGroups: ["authorization.k8s.io"]
-  resources: ["selfsubjectaccessreviews"]
+  resources: ["subjectaccessreviews"]
   verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
