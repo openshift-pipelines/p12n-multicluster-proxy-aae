@@ -60,6 +60,7 @@ make deploy
 | `--port` | `8080` | Port to listen on |
 | `--workers-secret-namespace` | `kueue-system` | Namespace for worker kubeconfig secrets |
 | `--request-timeout` | `30s` | Timeout for worker cluster requests |
+| `--websocket-write-timeout` | `30s` | Timeout for each WebSocket write |
 | `--default-log-tail-lines` | `100` | Default number of log lines to tail |
 | `--kubeconfig` | _(in-cluster)_ | Path to kubeconfig file |
 | `--tls-cert` | | Path to TLS certificate file |
@@ -81,6 +82,8 @@ go run ./cmd/proxy-server/main.go \
   --hub-qps=100 --hub-burst=200 \
   --client-qps=50 --client-burst=100
 ```
+
+WebSocket log streams accept requests without an `Origin` header for non-browser clients. Browser requests must use the same host as the log-stream endpoint.
 
 ### Environment Variables
 

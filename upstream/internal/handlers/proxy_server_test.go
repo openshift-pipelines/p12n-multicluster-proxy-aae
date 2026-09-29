@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
@@ -75,6 +77,14 @@ func (m *mockRegistry) ListClusters() []string {
 }
 
 func fakeWorkerAPI(pods map[string]*corev1.Pod, logs map[string]string) *httptest.Server {
+	chunks := make(map[string][]string, len(logs))
+	for key, content := range logs {
+		chunks[key] = []string{content}
+	}
+	return fakeWorkerAPIWithLogChunks(pods, chunks, 0)
+}
+
+func fakeWorkerAPIWithLogChunks(pods map[string]*corev1.Pod, logs map[string][]string, delay time.Duration) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Handle TaskRun listing: GET /apis/tekton.dev/v1/namespaces/{ns}/taskruns
 		if strings.HasPrefix(r.URL.Path, "/apis/tekton.dev/v1/namespaces/") {
@@ -109,9 +119,17 @@ func fakeWorkerAPI(pods map[string]*corev1.Pod, logs map[string]string) *httptes
 			key := parts[0] + "/" + parts[2]
 
 			if len(parts) == 4 && parts[3] == "log" {
-				if content, ok := logs[key]; ok {
+				if chunks, ok := logs[key]; ok {
 					w.Header().Set("Content-Type", "text/plain")
-					fmt.Fprint(w, content)
+					for i, content := range chunks {
+						_, _ = fmt.Fprint(w, content)
+						if i < len(chunks)-1 {
+							if flusher, ok := w.(http.Flusher); ok {
+								flusher.Flush()
+							}
+							time.Sleep(delay)
+						}
+					}
 					return
 				}
 				w.WriteHeader(http.StatusNotFound)
@@ -143,7 +161,10 @@ func newTestServer(workerURL string) *ProxyServer {
 			clusters: []string{"worker-1"},
 		},
 		authzHandler: &mockAuthorizer{},
-		config:       &config.Config{DefaultLogTailLines: 100},
+		config: &config.Config{
+			DefaultLogTailLines:   100,
+			WebSocketWriteTimeout: 30 * time.Second,
+		},
 	}
 }
 
@@ -365,6 +386,98 @@ func TestLogsFetchOwnershipValidation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLogsStreamOriginPolicy(t *testing.T) {
+	pod := makePod("test-pod", "test-ns", map[string]string{"tekton.dev/pipelineRun": "my-pr"})
+	worker := fakeWorkerAPI(
+		map[string]*corev1.Pod{"test-ns/test-pod": pod},
+		map[string]string{"test-ns/test-pod": "log line\n"},
+	)
+	defer worker.Close()
+
+	server := httptest.NewServer(newTestServer(worker.URL).Handler())
+	defer server.Close()
+	streamURL := "ws" + strings.TrimPrefix(server.URL, "http") +
+		"/api/v1/namespaces/test-ns/logs/stream?pod=test-pod&container=step-main&pipelineRun=my-pr"
+
+	tests := []struct {
+		name    string
+		origin  string
+		allowed bool
+	}{
+		{name: "no origin", allowed: true},
+		{name: "same origin", origin: server.URL, allowed: true},
+		{name: "different origin", origin: "https://attacker.example", allowed: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			header := http.Header{"Authorization": []string{"Bearer test-token"}}
+			if tc.origin != "" {
+				header.Set("Origin", tc.origin)
+			}
+			conn, response, err := websocket.DefaultDialer.Dial(streamURL, header)
+			if !tc.allowed {
+				if conn != nil {
+					_ = conn.Close()
+				}
+				if err == nil {
+					t.Fatal("cross-origin WebSocket connection succeeded")
+				}
+				if response == nil || response.StatusCode != http.StatusForbidden {
+					t.Fatalf("got response %v, want status %d", response, http.StatusForbidden)
+				}
+				_ = response.Body.Close()
+				return
+			}
+			if err != nil {
+				t.Fatalf("WebSocket connection failed: %v", err)
+			}
+			defer func() { _ = conn.Close() }()
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				t.Fatalf("read WebSocket message: %v", err)
+			}
+			if string(message) != "log line\n" {
+				t.Fatalf("got message %q, want %q", message, "log line\n")
+			}
+		})
+	}
+}
+
+func TestLogsStreamResetsDeadlineBeforeEveryWrite(t *testing.T) {
+	pod := makePod("test-pod", "test-ns", map[string]string{"tekton.dev/pipelineRun": "my-pr"})
+	worker := fakeWorkerAPIWithLogChunks(
+		map[string]*corev1.Pod{"test-ns/test-pod": pod},
+		map[string][]string{"test-ns/test-pod": {"first log\n", "second log\n"}},
+		150*time.Millisecond,
+	)
+	defer worker.Close()
+
+	proxy := newTestServer(worker.URL)
+	proxy.config.WebSocketWriteTimeout = 25 * time.Millisecond
+	server := httptest.NewServer(proxy.Handler())
+	defer server.Close()
+	streamURL := "ws" + strings.TrimPrefix(server.URL, "http") +
+		"/api/v1/namespaces/test-ns/logs/stream?pod=test-pod&container=step-main&pipelineRun=my-pr"
+	header := http.Header{"Authorization": []string{"Bearer test-token"}}
+	conn, _, err := websocket.DefaultDialer.Dial(streamURL, header)
+	if err != nil {
+		t.Fatalf("WebSocket connection failed: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	for _, want := range []string{"first log\n", "second log\n"} {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("read WebSocket message %q: %v", want, err)
+		}
+		if string(message) != want {
+			t.Fatalf("got message %q, want %q", message, want)
+		}
 	}
 }
 
