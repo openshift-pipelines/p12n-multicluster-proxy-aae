@@ -27,6 +27,7 @@ func main() {
 		workersSecretNS        = flag.String("workers-secret-namespace", defaultWorkersSecretNS, "Namespace for worker kubeconfig secrets")
 		port                   = flag.String("port", "8080", "Port to listen on")
 		requestTimeout         = flag.Duration("request-timeout", 30*time.Second, "Timeout for worker cluster requests")
+		webSocketWriteTimeout  = flag.Duration("websocket-write-timeout", 30*time.Second, "Timeout for each WebSocket write")
 		defaultLogTailLines    = flag.Int("default-log-tail-lines", 100, "Default number of log lines to tail")
 		clientQPS              = flag.Float64("client-qps", 50, "QPS for worker cluster clients")
 		clientBurst            = flag.Int("client-burst", 100, "Burst for worker cluster clients")
@@ -37,6 +38,9 @@ func main() {
 		tlsKey                 = flag.String("tls-key", "", "Path to TLS key file")
 	)
 	flag.Parse()
+	if *webSocketWriteTimeout <= 0 {
+		log.Fatal("websocket-write-timeout must be greater than zero")
+	}
 
 	// Initialize klog
 	klog.InitFlags(nil)
@@ -68,6 +72,7 @@ func main() {
 	appConfig := &config.Config{
 		WorkersSecretNamespace: *workersSecretNS,
 		RequestTimeout:         *requestTimeout,
+		WebSocketWriteTimeout:  *webSocketWriteTimeout,
 		DefaultLogTailLines:    *defaultLogTailLines,
 		ClientQPS:              float32(*clientQPS),
 		ClientBurst:            *clientBurst,
@@ -94,6 +99,7 @@ func main() {
 	klog.Infof("Starting proxy server on port %s", *port)
 	klog.Infof("Workers secret namespace: %s", *workersSecretNS)
 	klog.Infof("Request timeout: %v", *requestTimeout)
+	klog.Infof("WebSocket write timeout: %v", *webSocketWriteTimeout)
 
 	if *tlsCert != "" && *tlsKey != "" {
 		klog.Infof("Starting proxy server with TLS")

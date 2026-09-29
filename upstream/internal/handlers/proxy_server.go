@@ -439,12 +439,9 @@ func (p *ProxyServer) handleLogsStream(w http.ResponseWriter, r *http.Request, n
 	}
 	defer logs.Close()
 
-	// Upgrade to WebSocket
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool {
-			return true // Allow all origins for now
-		},
-	}
+	// Gorilla's default origin check allows non-browser clients without an Origin
+	// header and browser clients whose Origin host matches the request host.
+	upgrader := websocket.Upgrader{}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		klog.Errorf("Failed to upgrade to WebSocket: %v", err)
@@ -452,23 +449,25 @@ func (p *ProxyServer) handleLogsStream(w http.ResponseWriter, r *http.Request, n
 	}
 	defer conn.Close()
 
-	// Set WebSocket headers
-	conn.SetWriteDeadline(time.Now().Add(24 * time.Hour)) // 24 hour timeout
-
 	// Stream logs to WebSocket client
 	buffer := make([]byte, 1024)
 	for {
-		n, err := logs.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				klog.Errorf("Error reading logs stream: %v", err)
+		n, readErr := logs.Read(buffer)
+		if n > 0 {
+			// Bound each write without limiting the lifetime of an active stream.
+			if err := conn.SetWriteDeadline(time.Now().Add(p.config.WebSocketWriteTimeout)); err != nil {
+				klog.Errorf("Failed to set WebSocket write deadline: %v", err)
+				break
 			}
-			break
+			if err := conn.WriteMessage(websocket.TextMessage, buffer[:n]); err != nil {
+				klog.Errorf("Error writing to WebSocket: %v", err)
+				break
+			}
 		}
-
-		// Send log data to WebSocket client
-		if err := conn.WriteMessage(websocket.TextMessage, buffer[:n]); err != nil {
-			klog.Errorf("Error writing to WebSocket: %v", err)
+		if readErr != nil {
+			if readErr != io.EOF {
+				klog.Errorf("Error reading logs stream: %v", readErr)
+			}
 			break
 		}
 	}

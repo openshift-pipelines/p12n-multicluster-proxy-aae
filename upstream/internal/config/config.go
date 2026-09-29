@@ -6,6 +6,7 @@ import "time"
 type Config struct {
 	WorkersSecretNamespace string
 	RequestTimeout         time.Duration
+	WebSocketWriteTimeout  time.Duration
 	DefaultLogTailLines    int
 	ClientQPS              float32
 	ClientBurst            int
