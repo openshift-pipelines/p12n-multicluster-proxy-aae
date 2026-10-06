@@ -426,7 +426,7 @@ func (p *ProxyServer) handleLogsStream(w http.ResponseWriter, r *http.Request, n
 	// Set up log options for streaming
 	logOptions := &corev1.PodLogOptions{
 		Container: containerName,
-		Follow:    true, // Enable streaming
+		Follow:    true,
 	}
 
 	// Get logs stream from the worker cluster
