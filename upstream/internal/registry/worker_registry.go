@@ -12,6 +12,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/openshift-pipelines/multicluster-proxy-aae/internal/config"
+	tektonclient "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	kueuev1beta1 "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	kueueclient "sigs.k8s.io/kueue/client-go/clientset/versioned"
 )
@@ -21,22 +22,26 @@ const (
 	MultiKueueClusterAnnotation = "kueue.x-k8s.io/multikueue-cluster"
 )
 
-// WorkerConfigRegistry manages worker cluster configurations
+// WorkerConfigRegistry manages worker cluster configurations and cached clients
 type WorkerConfigRegistry struct {
-	kubeClient  kubernetes.Interface
-	kueueClient kueueclient.Interface
-	config      *config.Config
-	configs     map[string]*rest.Config
-	mu          sync.RWMutex
+	kubeClient    kubernetes.Interface
+	kueueClient   kueueclient.Interface
+	config        *config.Config
+	configs       map[string]*rest.Config
+	kubeClients   map[string]kubernetes.Interface
+	tektonClients map[string]tektonclient.Interface
+	mu            sync.RWMutex
 }
 
 // NewWorkerConfigRegistry creates a new WorkerConfigRegistry
 func NewWorkerConfigRegistry(kubeClient kubernetes.Interface, kueueClient kueueclient.Interface, config *config.Config) *WorkerConfigRegistry {
 	registry := &WorkerConfigRegistry{
-		kubeClient:  kubeClient,
-		kueueClient: kueueClient,
-		config:      config,
-		configs:     make(map[string]*rest.Config),
+		kubeClient:    kubeClient,
+		kueueClient:   kueueClient,
+		config:        config,
+		configs:       make(map[string]*rest.Config),
+		kubeClients:   make(map[string]kubernetes.Interface),
+		tektonClients: make(map[string]tektonclient.Interface),
 	}
 
 	// Start watching for MultiKueueCluster changes
@@ -57,6 +62,66 @@ func (r *WorkerConfigRegistry) GetConfig(clusterName string) (*rest.Config, erro
 	return config, nil
 }
 
+// GetKubeClient returns a cached Kubernetes client for a worker cluster
+func (r *WorkerConfigRegistry) GetKubeClient(clusterName string) (kubernetes.Interface, error) {
+	r.mu.RLock()
+	if client, ok := r.kubeClients[clusterName]; ok {
+		r.mu.RUnlock()
+		return client, nil
+	}
+	r.mu.RUnlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if client, ok := r.kubeClients[clusterName]; ok {
+		return client, nil
+	}
+
+	cfg, ok := r.configs[clusterName]
+	if !ok {
+		return nil, fmt.Errorf("worker config not found for cluster: %s", clusterName)
+	}
+
+	client, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kube client for cluster %s: %v", clusterName, err)
+	}
+
+	r.kubeClients[clusterName] = client
+	return client, nil
+}
+
+// GetTektonClient returns a cached Tekton client for a worker cluster
+func (r *WorkerConfigRegistry) GetTektonClient(clusterName string) (tektonclient.Interface, error) {
+	r.mu.RLock()
+	if client, ok := r.tektonClients[clusterName]; ok {
+		r.mu.RUnlock()
+		return client, nil
+	}
+	r.mu.RUnlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if client, ok := r.tektonClients[clusterName]; ok {
+		return client, nil
+	}
+
+	cfg, ok := r.configs[clusterName]
+	if !ok {
+		return nil, fmt.Errorf("worker config not found for cluster: %s", clusterName)
+	}
+
+	client, err := tektonclient.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tekton client for cluster %s: %v", clusterName, err)
+	}
+
+	r.tektonClients[clusterName] = client
+	return client, nil
+}
+
 // LoadConfigs loads all worker configurations from MultiKueueCluster resources
 func (r *WorkerConfigRegistry) LoadConfigs(ctx context.Context) error {
 	r.mu.Lock()
@@ -67,6 +132,10 @@ func (r *WorkerConfigRegistry) LoadConfigs(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to list MultiKueueClusters: %v", err)
 	}
+
+	// Clear cached clients since configs may have changed
+	r.kubeClients = make(map[string]kubernetes.Interface)
+	r.tektonClients = make(map[string]tektonclient.Interface)
 
 	// Load each MultiKueueCluster
 	for _, cluster := range clusters.Items {
@@ -99,13 +168,16 @@ func (r *WorkerConfigRegistry) LoadConfigs(ctx context.Context) error {
 		}
 
 		// Parse kubeconfig using clientcmd
-		config, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
+		cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
 		if err != nil {
 			klog.Errorf("Failed to parse kubeconfig for cluster %s: %v", clusterName, err)
 			continue
 		}
 
-		r.configs[clusterName] = config
+		cfg.QPS = r.config.ClientQPS
+		cfg.Burst = r.config.ClientBurst
+
+		r.configs[clusterName] = cfg
 		klog.Infof("Loaded worker config for cluster: %s (secret: %s)", clusterName, secretName)
 	}
 
@@ -137,10 +209,12 @@ func (r *WorkerConfigRegistry) watchMultiKueueClusters() {
 				klog.Errorf("Failed to reload worker configs: %v", err)
 			}
 		case "DELETED":
-			// Remove config for deleted MultiKueueCluster
+			// Remove config and cached clients for deleted MultiKueueCluster
 			if cluster, ok := event.Object.(*kueuev1beta1.MultiKueueCluster); ok {
 				r.mu.Lock()
 				delete(r.configs, cluster.Name)
+				delete(r.kubeClients, cluster.Name)
+				delete(r.tektonClients, cluster.Name)
 				r.mu.Unlock()
 				klog.Infof("Removed worker config for cluster: %s", cluster.Name)
 			}
