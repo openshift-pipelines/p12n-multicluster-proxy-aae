@@ -1,5 +1,5 @@
 ARG GO_BUILDER=registry.access.redhat.com/ubi10/go-toolset:latest@sha256:be70aa468168f1ecd46e56d5f362e697243bcf9d3a2d98819597e43471a5d0e4
-ARG RUNTIME=registry.access.redhat.com/ubi9/ubi-minimal:latest
+ARG UBI_RUNTIME=registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 FROM $GO_BUILDER AS builder
 
@@ -13,7 +13,7 @@ RUN set -e; for f in patches/*.patch; do echo ${f}; [[ -f ${f} ]] || continue; g
 RUN CGO_ENABLED=1 go build -mod=vendor -tags disable_gcp,strictfipsruntime  -v -o /tmp/proxy-aae \
     ./cmd/proxy-server
 
-FROM $RUNTIME
+FROM $UBI_RUNTIME
 WORKDIR /
 
 
