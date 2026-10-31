@@ -12,8 +12,8 @@ metadata:
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
       == "release-v1.23.x" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
-      ".konflux/dockerfiles/multicluster-proxy-aae.Dockerfile".pathChanged() ||
-      ".tekton/multicluster-proxy-aae-1-23-multicluster-proxy-aae-push.yaml".pathChanged())
+      ".konflux/dockerfiles/***".pathChanged() ||
+      ".tekton/***".pathChanged())
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: openshift-pipelines-core-1-23
