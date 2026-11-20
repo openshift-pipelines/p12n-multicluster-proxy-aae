@@ -78,11 +78,11 @@ deps:
 
 # Build and push with ko
 ko-build: $(KO)
-	$(KO) build --local .
+	$(KO) build --image-user=65532:65532 --local .
 
 # Deploy to Kubernetes with ko
 deploy: $(KO)
-	kubectl kustomize config/base/ | $(KO) apply -f -
+	kubectl kustomize config/base/ | $(KO) apply --image-user=65532:65532 -f -
 
 # Undeploy from Kubernetes
 undeploy: $(KO)
