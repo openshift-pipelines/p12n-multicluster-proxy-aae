@@ -1,24 +1,24 @@
 # Build stage
-FROM golang:1.27-alpine AS builder
+FROM registry.redhat.io/ubi9/go-toolset:1.26.10-1793294290@sha256:cab9089469c52029e4d8a4e9f717e87c51ab22eed448ebcada101b811f97dfe7 AS builder
 
-WORKDIR /app
+WORKDIR /opt/app-root/src
 
 # Copy go mod files
-COPY go.mod go.sum ./
+COPY --chown=1001:0 go.mod go.sum ./
 
 # Copy source code
-COPY . .
+COPY --chown=1001:0 . .
 
 # Build the application
 RUN go build -o proxy-aae ./cmd/proxy-server/main.go
 
 # Final stage
-FROM gcr.io/distroless/static:nonroot
+FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:f26ef64172ea61f5ac5ba4be8c5c738bf8760b22b3e5148ce7b40f7308ab32db
 
 WORKDIR /
 
 # Copy the binary from builder stage
-COPY --from=builder /app/proxy-aae .
+COPY --from=builder /opt/app-root/src/proxy-aae .
 
 # Use nonroot user
 USER 65532:65532
